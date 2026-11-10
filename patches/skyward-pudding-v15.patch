@@ -1,0 +1,489 @@
+diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/main.rs 构建/skyward-0.2.0/crates/skyward/src/main.rs
+--- /tmp/pristine2/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
++++ 构建/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-10 12:24:34.979140035 +0000
+@@ -26,6 +26,8 @@
+ #[cfg(target_os = "android")]
+ mod relabel;
+ #[cfg(target_os = "android")]
++mod remember;
++#[cfg(target_os = "android")]
+ mod secure;
+ #[cfg(target_os = "android")]
+ mod services;
+@@ -748,10 +750,30 @@
+             // erasing them, which may take super with them, and undoing
+             // shared blocks, which writes to the slot's own.
+             if !matches!(request.work, bcb::Work::Fastboot | bcb::Work::WipeAb { .. } | bcb::Work::UnshareBlocks) {
+-                prepare(&cfg, booted_slot()?)?;
++                // The screen comes up first: mapping super, mounting the slot's
++                // partitions, loading the drivers and starting the phone's own
++                // services takes seconds, and until the screen is drawn the
++                // phone looks stuck. What needs them waits for them instead --
++                // `wait_prepared` is what a page calls before it does.
++                let cfg = cfg.clone();
++                std::thread::Builder::new().name("prepare".into()).spawn(move || {
++                    let done = booted_slot()
++                        .map_err(|e| anyhow::anyhow!("{e:#}"))
++                        .and_then(|slot| prepare(&cfg, slot));
++                    if let Err(e) = done {
++                        let _ = skyward_sys::kmsg(&format!("devices not brought up: {e:#}"));
++                    }
++                    mark_prepared();
++                })?;
++            } else {
++                mark_prepared();
+             }
+             let root = Path::new("/");
+-            ui::run(&cfg, &root.join(ramdisk::FONT), &root.join(ramdisk::MONO), request, Screen::Home, None)
++            // The phone comes here to open its data partition, so that is what
++            // it is shown: the page opens the partition as it appears, and the
++            // control its screen lock is answered with is up by then. Leaving
++            // it, by its own way out or by the back key, is the menu.
++            ui::run(&cfg, &root.join(ramdisk::FONT), &root.join(ramdisk::MONO), request, Screen::Decrypt, None)
+         }
+         #[cfg(not(target_os = "android"))]
+         {
+@@ -763,6 +785,45 @@
+     })
+ }
+ 
++/// How long a page waits for the phone's own parts before it goes ahead.
++#[cfg(target_os = "android")]
++const PREPARE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
++
++#[cfg(target_os = "android")]
++struct Gate {
++    done: std::sync::Mutex<bool>,
++    cv: std::sync::Condvar,
++}
++
++#[cfg(target_os = "android")]
++static PREPARED: std::sync::OnceLock<Gate> = std::sync::OnceLock::new();
++
++#[cfg(target_os = "android")]
++fn gate() -> &'static Gate {
++    PREPARED.get_or_init(|| Gate { done: std::sync::Mutex::new(false), cv: std::sync::Condvar::new() })
++}
++
++/// Say the phone's own parts are up, or that bringing them up failed: either
++/// way nothing is gained by waiting longer.
++#[cfg(target_os = "android")]
++fn mark_prepared() {
++    let gate = gate();
++    *gate.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
++    gate.cv.notify_all();
++}
++
++/// Wait until the phone's own parts are up, and no longer than `PREPARE_WAIT`:
++/// a page that needs the partitions or the phone's services calls this first,
++/// so that the screen can be drawn before any of them are ready.
++#[cfg(target_os = "android")]
++pub(crate) fn wait_prepared() {
++    let gate = gate();
++    let done = gate.done.lock().unwrap_or_else(|e| e.into_inner());
++    if !*done {
++        let _ = gate.cv.wait_timeout(done, PREPARE_WAIT);
++    }
++}
++
+ /// Map and mount the slot's partitions from super, then bring up what runs
+ /// from them. Recovery has to stay usable when super cannot be mounted, as
+ /// after it is wiped, so the reason goes to the kernel log instead.
+diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/remember.rs 构建/skyward-0.2.0/crates/skyward/src/remember.rs
+--- /tmp/pristine2/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
++++ 构建/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
+@@ -0,0 +1,60 @@
++//! The screen lock a user chose to have kept, so that the data partition
++//! opens as the recovery starts rather than waiting for it to be typed.
++//!
++//! It is kept where the recovery keeps its own settings, readable by root
++//! alone. A factory reset formats that partition, and so does the way out of
++//! the decrypt page that forgets it.
++
++use anyhow::{Context, Result};
++use std::os::unix::fs::PermissionsExt;
++use std::path::Path;
++
++/// The partition the file is on. The recovery mounts it read-only, as the
++/// phone's own recovery does, so it is made writable for as long as this
++/// takes and then read-only again.
++const METADATA: &str = "/metadata";
++
++/// Where it is kept: beside the recovery's own settings.
++pub const FILE: &str = "/metadata/skyward/credential";
++
++/// The screen lock kept from before, where one was kept.
++pub fn read() -> Option<Vec<u8>> {
++    std::fs::read(FILE).ok().filter(|kept| !kept.is_empty())
++}
++
++/// Do `work` with the partition writable, and read-only again afterwards.
++fn writable<T>(work: impl FnOnce() -> Result<T>) -> Result<T> {
++    let at = Path::new(METADATA);
++    let mounted = skyward_block::mount::is_mount_point(at)?;
++    if mounted {
++        skyward_block::mount::remount_writable(at, true).context("make /metadata writable")?;
++    }
++    let done = work();
++    if mounted {
++        let _ = skyward_block::mount::remount_writable(at, false);
++    }
++    done
++}
++
++/// Keep `credential` for the starts that follow.
++pub fn write(credential: &[u8]) -> Result<()> {
++    writable(|| {
++    let at = Path::new(FILE);
++    if let Some(dir) = at.parent() {
++        std::fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
++    }
++    std::fs::write(at, credential).with_context(|| format!("write {}", at.display()))?;
++    std::fs::set_permissions(at, std::fs::Permissions::from_mode(0o600))
++        .with_context(|| format!("keep {} to root alone", at.display()))?;
++    Ok(())
++    })
++}
++
++/// Forget the screen lock kept from before, if there is one.
++pub fn forget() -> Result<()> {
++    writable(|| match std::fs::remove_file(FILE) {
++        Ok(()) => Ok(()),
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
++        Err(e) => Err(e).with_context(|| format!("remove {FILE}")),
++    })
++}
+diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/ui.rs 构建/skyward-0.2.0/crates/skyward/src/ui.rs
+--- /tmp/pristine2/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
++++ 构建/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-10 12:43:40.299999946 +0000
+@@ -3,6 +3,7 @@
+ use crate::filework;
+ use crate::haptics::Haptics;
+ use crate::relabel;
++use crate::remember;
+ use crate::input::{monotonic_ms, Event, Inputs};
+ use crate::merge;
+ use crate::partwork;
+@@ -62,7 +63,7 @@
+ 
+ /// How long after the screen starts a touch panel may still come up; with
+ /// none by then, the pages are worked with the keys, their light shown.
+-const TOUCH_WAIT: Duration = Duration::from_secs(5);
++const TOUCH_WAIT: Duration = Duration::from_secs(10);
+ 
+ /// How long a panel gone dark rests, ready to light again at once, before
+ /// the display turns off; the phone's own system keeps its panel dozing
+@@ -1057,6 +1058,7 @@
+     let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;
+     let started = Instant::now();
+     let mut touch_known = false;
++    let mut said_missing = false;
+     // adbd and fastbootd ask over it to go over to fastboot and back.
+     let control = Control::open()?;
+     let mut haptics = cfg.haptics.as_ref().map(Haptics::open).transpose()?;
+@@ -1105,6 +1107,13 @@
+     // and the users whose own files are still closed once it is open.
+     let mut decryptor: Option<Decryptor> = None;
+     let mut closed: Vec<Closed> = Vec::new();
++    // The screen lock kept from before, where one was kept, so that the data
++    // partition opens as the recovery starts.
++    let mut remembered: Option<Vec<u8>> = remember::read();
++    let mut tried_remembered = false;
++    let mut attempt_was_remembered = false;
++    let mut last_credential: Option<Vec<u8>> = None;
++    app.state.remember = remembered.is_some();
+     let mut arriving = Some(Incoming::Arrived);
+     // The mount page shows the partitions as they are when it opens and
+     // after each change; why they cannot be read is the page's to say.
+@@ -1383,8 +1392,17 @@
+             if !inputs.has_panel() {
+                 skyward_sys::kmsg("no touch panel came up; the pages are worked with the keys")?;
+                 app.touchscreen_missing();
++                said_missing = true;
+             }
+         }
++        // The driver of this phone's touchscreen brings its input device up
++        // seconds after the module is loaded; until then the pages are worked
++        // with the keys, and touches are taken again once it is there.
++        if said_missing && inputs.has_panel() {
++            said_missing = false;
++            skyward_sys::kmsg("the touch panel came up; the pages take touches again")?;
++            app.touchscreen_found();
++        }
+         for fx in app.tick(now) {
+             match fx {
+                 Effect::Haptic => {
+@@ -2035,6 +2053,20 @@
+                     }
+                     closed = opening.closed;
+                     show_closed(&mut app, &closed)?;
++                    // The screen lock kept from before opens the user's own
++                    // files without anyone typing it. A wrong one is not tried
++                    // again: the secure world counts it against the user.
++                    if !tried_remembered && !closed.is_empty() {
++                        tried_remembered = true;
++                        if let (Some(credential), Some(first)) = (remembered.clone(), closed.first()) {
++                            let user = first.user;
++                            skyward_sys::kmsg(&format!("opening user {user}'s files with the screen lock kept from before"))?;
++                            last_credential = Some(credential.clone());
++                            attempt_was_remembered = true;
++                            let job = decrypt::Job::Unlock { closed: closed.clone(), user, credential };
++                            decryptor = Some(Decryptor::start(job)?);
++                        }
++                    }
+                 }
+                 decrypt::Ended::Opened(Err(why)) => {
+                     skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
+@@ -2051,11 +2083,42 @@
+                     app.data_failed(why);
+                 }
+                 decrypt::Ended::Unlocked(Ok(still)) => {
++                    let opened = still.len() < closed.len();
+                     closed = still;
+                     show_closed(&mut app, &closed)?;
++                    // The page has done its work: the menu is what to show,
++                    // with no page of its own in between. One that failed to
++                    // open the partition stays where it is.
++                    if closed.is_empty() {
++                        app.decrypted();
++                    }
++                    if opened {
++                        match (app.state.remember, last_credential.as_deref()) {
++                            (true, Some(credential)) => match remember::write(credential) {
++                                Ok(()) => {
++                                    remembered = Some(credential.to_vec());
++                                    skyward_sys::kmsg("the screen lock is kept for the starts that follow")?;
++                                }
++                                Err(e) => skyward_sys::kmsg(&format!("the screen lock was not kept: {e:#}"))?,
++                            },
++                            (false, _) => {
++                                remembered = None;
++                                if let Err(e) = remember::forget() {
++                                    skyward_sys::kmsg(&format!("the kept screen lock was not forgotten: {e:#}"))?;
++                                }
++                            }
++                            _ => {}
++                        }
++                    }
+                 }
+                 decrypt::Ended::Unlocked(Err(why)) => {
+                     skyward_sys::kmsg(&format!("what was entered did not open the user's files: {why}"))?;
++                    if attempt_was_remembered {
++                        remembered = None;
++                        app.state.remember = false;
++                        let _ = remember::forget();
++                        skyward_sys::kmsg("the screen lock kept from before did not open the user's files, so it is forgotten")?;
++                    }
+                     app.unlock_failed(why, now);
+                 }
+             }
+@@ -2295,13 +2358,28 @@
+                     // under way, and takes nothing more until it is done.
+                     Effect::OpenData => {
+                         ensure!(decryptor.is_none(), "the data partition is being opened already");
++                        // The screen is drawn before the phone's own parts are
++                        // up; the key service this needs is one of them.
++                        crate::wait_prepared();
+                         decryptor = Some(Decryptor::start(decrypt::Job::Open)?);
+                     }
+                     Effect::Unlock { user, code } => {
+                         ensure!(decryptor.is_none(), "the data partition is being opened already");
+-                        let job = decrypt::Job::Unlock { closed: closed.clone(), user, credential: code.into_bytes() };
++                        crate::wait_prepared();
++                        let credential = code.into_bytes();
++                        last_credential = Some(credential.clone());
++                        attempt_was_remembered = false;
++                        let job = decrypt::Job::Unlock { closed: closed.clone(), user, credential };
+                         decryptor = Some(Decryptor::start(job)?);
+                     }
++                    Effect::Remember(on) => {
++                        if !on {
++                            remembered = None;
++                            if let Err(e) = remember::forget() {
++                                skyward_sys::kmsg(&format!("the kept screen lock was not forgotten: {e:#}"))?;
++                            }
++                        }
++                    }
+                     Effect::ReadDir(folder) => list(&mut app, folder)?,
+                     Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,
+                     // A name taken where an entry goes is the user's to
+diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-crypto/src/data.rs 构建/skyward-0.2.0/crates/skyward-crypto/src/data.rs
+--- /tmp/pristine2/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
++++ 构建/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 11:46:16.603999966 +0000
+@@ -364,6 +364,32 @@
+             ),
+         },
+     };
++    let first = protector_at(&dir, &id)?;
++    // The weaver of a phone that has one lives in its secure element, reached
++    // through the phone's own OMAPI service; a recovery runs none of Android's
++    // framework, so the blob the lock settings name cannot be opened there even
++    // where the weaver's service answers. Android keeps a second blob for the
++    // same user bound to the bytes beside it, which the credential service
++    // alone opens: that one is taken instead, and opens the same secret with
++    // the same credential.
++    if matches!(first.bound, Bound::Weaver(_)) {
++        let other = ids.iter().find(|other| {
++            other.as_str() != id.as_str()
++                && dir.join(format!("{other}.secdis")).is_file()
++                && dir.join(format!("{other}.pwd")).is_file()
++        });
++        if let Some(other) = other {
++            let alt = protector_at(&dir, other.as_str())?;
++            if matches!(alt.bound, Bound::Secdiscardable(_)) {
++                return Ok(alt);
++            }
++        }
++    }
++    Ok(first)
++}
++
++/// What the blob `id` in `dir` keeps a user's secret behind, read as it lies.
++fn protector_at(dir: &Path, id: &str) -> Result<crate::user::Protector> {
+     // A user who has set a screen lock has what the phone recorded about
+     // it beside the blob; a user who has set none has nothing there.
+     let recorded = dir.join(format!("{id}.pwd"));
+@@ -385,7 +411,7 @@
+     Ok(crate::user::Protector {
+         blob: std::fs::read(dir.join(format!("{id}.spblob"))).with_context(|| format!("read the blob in {}", dir.display()))?,
+         bound,
+-        id,
++        id: id.to_string(),
+         lock,
+     })
+ }
+diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/app.rs 构建/skyward-0.2.0/crates/skyward-ui/src/app.rs
+--- /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
++++ 构建/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-10 12:43:40.299999946 +0000
+@@ -1169,6 +1169,8 @@
+     Skip,
+     /// Try opening the data partition again, after it did not open.
+     OpenData,
++    /// Keep the screen lock, or stop keeping it.
++    Remember,
+     Back,
+     Theme { dark: bool },
+     Toggle(Switch),
+@@ -1671,6 +1673,9 @@
+     /// lock its users' own files wait on.
+     pub data: Data,
+     pub code: String,
++    /// Whether the screen lock is kept, so that the data partition opens as
++    /// the recovery starts next time.
++    pub remember: bool,
+     /// What is typed in the search field.
+     pub search: String,
+     /// The on-screen keyboard's layer.
+@@ -1799,6 +1804,7 @@
+             system_notice: None,
+             data: Data::Closed,
+             code: String::new(),
++            remember: false,
+             search: String::new(),
+             layer: Layer::Letters,
+             held: None,
+@@ -2011,6 +2017,8 @@
+     /// knows, telling what waits with [`App::data_waiting`] or why it did
+     /// not open with [`App::data_failed`].
+     OpenData,
++    /// Keep the screen lock, or stop keeping it.
++    Remember(bool),
+     /// Open the own files of `user` with what they entered at their screen
+     /// lock, telling what still waits with [`App::data_waiting`] or why it
+     /// did not open with [`App::unlock_failed`].
+@@ -5137,6 +5145,11 @@
+                 return self.arrive_at(s);
+             }
+             Action::OpenData => return self.open_data(),
++            Action::Remember => {
++                self.state.remember = !self.state.remember;
++                self.refresh();
++                return vec![Effect::Remember(self.state.remember)];
++            }
+             Action::Skip => {
+                 self.leave(true);
+                 if self.stack.len() > 1 {
+@@ -6274,6 +6287,32 @@
+         self.dirty = true;
+     }
+ 
++    /// The data partition opened: the page that asked for the screen lock has
++    /// done its work, and the menu it came from is what to show. A page that
++    /// failed to open it keeps saying so, and is left alone.
++    pub fn decrypted(&mut self) {
++        if self.screen() != Screen::Decrypt || !matches!(self.state.data, Data::Open) {
++            return;
++        }
++        self.leave(true);
++        if self.stack.len() > 1 {
++            self.stack.pop();
++        } else {
++            *self.top_mut() = (Screen::Home, 0.0, Focus::Unset);
++        }
++        self.settle_page();
++        self.refresh();
++    }
++
++    /// The touch panel came up after the pages had been worked with the keys:
++    /// touches are taken again.
++    pub fn touchscreen_found(&mut self) {
++        if self.keys {
++            self.keys = false;
++            self.dirty = true;
++        }
++    }
++
+     /// A button went down. With the keys working the page, the volume keys
+     /// move the light from control to control and the power key works the
+     /// one lit as it comes back up; otherwise the first volume press lights
+diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/pages.rs 构建/skyward-0.2.0/crates/skyward-ui/src/pages.rs
+--- /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
++++ 构建/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-10 12:47:04.431999981 +0000
+@@ -687,14 +687,23 @@
+     let (c, l) = (page(cx), cx.state.lang);
+     match &cx.state.data {
+         Data::Locked { user, keys, checking } => code(cx, c, *user, *keys, *checking),
+-        Data::Closed | Data::Opening => data_status(
+-            cx,
+-            c,
+-            Icon::Lock,
+-            l.pick(["解密 data 分区", "解密 data 分割區", "Decrypt the data partition"]),
+-            Some(l.pick(["正在读取锁屏方式", "正在讀取螢幕鎖定方式", "Reading the screen lock"])),
+-            None,
+-        ),
++        Data::Closed | Data::Opening => {
++            // With the screen lock kept from before there is nothing to read:
++            // it is that one the partition is opened with.
++            let note = if cx.state.remember {
++                l.pick(["正在用记住的密码解密", "正在用記住的密碼解密", "Decrypting with the screen lock you kept"])
++            } else {
++                l.pick(["正在读取锁屏方式", "正在讀取螢幕鎖定方式", "Reading the screen lock"])
++            };
++            data_status(
++                cx,
++                c,
++                Icon::Lock,
++                l.pick(["解密 data 分区", "解密 data 分割區", "Decrypt the data partition"]),
++                Some(note),
++                None,
++            )
++        }
+         Data::Open => data_status(
+             cx,
+             c,
+@@ -798,6 +807,15 @@
+     if keys != Keys::Pattern {
+         widgets::code_dots(&mut c, t, x, bottom - m.dp(92.0), s.code.chars().count());
+     }
++    // Whether the screen lock is kept, so that the partition opens as the
++    // recovery starts next time without anyone typing it.
++    let mark = if s.remember { "●" } else { "○" };
++    let kept = tr!(l, "{mark} 记住密码，下次自动解密", "{mark} 記住密碼，下次自動解密", "{mark} Remember the screen lock and decrypt next time");
++    c.text_center(&f.body, &kept, x, bottom - m.dp(136.0), m.sub_px, if s.remember { t.pal.accent } else { t.pal.subtitle });
++    out.push(Hit {
++        rect: Rect::new(x - m.dp(160.0), bottom - m.dp(160.0), m.dp(320.0), m.dp(48.0)),
++        action: Action::Remember,
++    });
+     let skip_cy = bottom - m.dp(34.0);
+     c.text_center(&f.heading, l.pick(NOT_NOW), x, skip_cy, m.row_title_px, t.pal.accent);
+     out.push(Hit { rect: Rect::new(x - m.dp(80.0), skip_cy - m.dp(24.0), m.dp(160.0), m.dp(48.0)), action: Action::Skip });
