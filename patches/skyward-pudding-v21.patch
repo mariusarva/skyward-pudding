@@ -1,6 +1,6 @@
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/main.rs
---- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-10 15:02:10.955999873 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/main.rs
+--- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-10 15:02:10.955999873 +0000
 @@ -26,6 +26,8 @@
  #[cfg(target_os = "android")]
  mod relabel;
@@ -139,9 +139,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/
  /// Map and mount the slot's partitions from super, then bring up what runs
  /// from them. Recovery has to stay usable when super cannot be mounted, as
  /// after it is wiped, so the reason goes to the kernel log instead.
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/remember.rs
---- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/remember.rs
+--- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
 @@ -0,0 +1,60 @@
 +//! The screen lock a user chose to have kept, so that the data partition
 +//! opens as the recovery starts rather than waiting for it to be typed.
@@ -203,9 +203,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/
 +        Err(e) => Err(e).with_context(|| format!("remove {FILE}")),
 +    })
 +}
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/ui.rs
---- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-10 15:25:37.935999970 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/ui.rs
+--- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-10 15:25:37.935999970 +0000
 @@ -3,6 +3,7 @@
  use crate::filework;
  use crate::haptics::Haptics;
@@ -375,9 +375,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/
                      Effect::ReadDir(folder) => list(&mut app, folder)?,
                      Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,
                      // A name taken where an entry goes is the user's to
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-crypto/src/data.rs
---- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-crypto/src/data.rs
+--- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
 @@ -32,6 +32,12 @@
  /// The phone's owner, the first of its users.
  const OWNER: u32 = 0;
@@ -443,9 +443,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/
          lock,
      })
  }
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-modules/src/lib.rs
---- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-10 15:01:41.143999884 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-modules/src/lib.rs
+--- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-10 15:01:41.143999884 +0000
 @@ -25,6 +25,10 @@
  /// loaded. Returns the files loaded, dependencies first.
  pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
@@ -467,9 +467,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/
              insmod(&path, "")?;
              loaded.push(path);
          }
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-ui/src/app.rs
---- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-10 15:02:23.523999868 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-ui/src/app.rs
+--- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-10 15:02:23.523999868 +0000
 @@ -1169,6 +1169,8 @@
      Skip,
      /// Try opening the data partition again, after it did not open.
@@ -555,10 +555,26 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/
      /// A button went down. With the keys working the page, the volume keys
      /// move the light from control to control and the power key works the
      /// one lit as it comes back up; otherwise the first volume press lights
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-ui/src/pages.rs
---- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-10 15:02:36.039999863 +0000
-@@ -687,14 +687,27 @@
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-ui/src/pages.rs
+--- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-10 23:43:34.313999958 +0000
+@@ -286,6 +286,7 @@
+         y = first.bottom + t.m.card_gap;
+     }
+     let tools = widgets::list(&mut c, t, f, y, &[
++        Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
+         Row::new(l.pick(["安装", "安裝", "Install"])).icon(GREEN, Icon::Install),
+         Row::new(l.pick(["备份", "備份", "Backup"])).icon(BLUE, Icon::Backup),
+         Row::new(l.pick(["恢复", "還原", "Restore"])).icon(PURPLE, Icon::Restore),
+@@ -293,6 +294,7 @@
+         Row::new(l.pick(DECRYPT)).icon(BLUE, Icon::Lock).trail(Trail::Value(fmt::data(l, &cx.state.data))),
+     ]);
+     out.extend(hits(&tools.rows, &[
++        Action::Open(Screen::Files),
+         Action::Open(Screen::Install),
+         Action::Open(Screen::Backup),
+         Action::Open(Screen::Restore),
+@@ -687,14 +689,27 @@
      let (c, l) = (page(cx), cx.state.lang);
      match &cx.state.data {
          Data::Locked { user, keys, checking } => code(cx, c, *user, *keys, *checking),
@@ -594,7 +610,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/
          Data::Open => data_status(
              cx,
              c,
-@@ -798,6 +811,15 @@
+@@ -798,6 +813,15 @@
      if keys != Keys::Pattern {
          widgets::code_dots(&mut c, t, x, bottom - m.dp(92.0), s.code.chars().count());
      }

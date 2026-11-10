@@ -25,6 +25,7 @@
 - **界面优先**：`prepare()` 放到后台线程，首帧不再等 super 映射与服务就绪；准备完成后自动重读一次槽位
 - **不解密 999（分身）**：HyperOS 的第二空间凭据由主用户代持，开它是页面没在等的第二次解锁，会卡住；直接跳过，主用户照常解密
 - **触摸等待放宽到 10 秒**：面板后到会自动恢复触摸，不再误判成“没有面板”
+- **文件管理提到首页**：首页工具区第一行就是文件管理，高级页里的入口也保留
 
 ## 下载与刷入
 
@@ -33,7 +34,7 @@
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 b
-fastboot flash recovery_b skyward-pudding-20261110-v20-OS4.0.4.0.XPCCNXM.img
+fastboot flash recovery_b skyward-pudding-20261110-v21-OS4.0.4.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进，别用 fastboot reboot recovery
 ```
@@ -45,8 +46,8 @@ adb reboot recovery                          # 从系统进，别用 fastboot re
 ## 校验
 
 ```
-sha256  d7f1d8b83fafd15b1aedb100bc21607dc495214bed77b556a8ec8e161c0927a3
-md5     8973c0f6fb45955e48b43e20b68a6059
+sha256  38a9eb8b4d5deeb341c6d3ccf33fb2a7fd717f9356345bfcca11b362f39b2af0
+md5     c1fc0ce4432a96cfbef0683aeac895d0
 大小    104857600
 ```
 
@@ -59,7 +60,7 @@ tar xzf skyward.tar.gz
 cd skyward-0.2.0
 
 # 2) 打本仓库的补丁
-patch -p1 < ../patches/skyward-pudding-v20.patch
+patch -p1 < ../patches/skyward-pudding-v21.patch
 
 # 3) 交叉编译（宿主 aarch64 也能编，见 docs/开发记录.md 的“两个坑”）
 rustup target add aarch64-linux-android
