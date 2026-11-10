@@ -1,6 +1,6 @@
-diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/main.rs 构建/skyward-0.2.0/crates/skyward/src/main.rs
---- /tmp/pristine2/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
-+++ 构建/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-10 12:24:34.979140035 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/main.rs
+--- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-10 15:02:10.955999873 +0000
 @@ -26,6 +26,8 @@
  #[cfg(target_os = "android")]
  mod relabel;
@@ -10,6 +10,15 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/main.rs 构建/skyward
  mod secure;
  #[cfg(target_os = "android")]
  mod services;
+@@ -695,7 +697,7 @@
+         if !request.work.lasts() {
+             bcb::clear(&misc)?;
+         }
+-        let cfg = DeviceConfig::load(Path::new("/").join(ramdisk::CONFIG))?;
++        let cfg = device_config()?;
+         skyward_sys::kmsg(&format!(
+             "{} {} recovery up, misc command {:?} args {:?}, asking for {:?}",
+             cfg.device.codename,
 @@ -748,10 +750,30 @@
              // erasing them, which may take super with them, and undoing
              // shared blocks, which writes to the slot's own.
@@ -43,7 +52,7 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/main.rs 构建/skyward
          }
          #[cfg(not(target_os = "android"))]
          {
-@@ -763,6 +785,45 @@
+@@ -763,6 +785,86 @@
      })
  }
  
@@ -86,12 +95,53 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/main.rs 构建/skyward
 +    }
 +}
 +
++/// Whether the phone's own parts are up already, asked without waiting: a page
++/// drawn before they are says it waits for them rather than that it does the
++/// work they stand in the way of.
++#[cfg(target_os = "android")]
++pub(crate) fn prepared() -> bool {
++    *gate().done.lock().unwrap_or_else(|e| e.into_inner())
++}
++
++/// The configuration to run by: the phone's own, where the ramdisk carries one
++/// for it, and the one the ramdisk was built with otherwise. A phone names
++/// itself through the bootloader, as `ro.boot.hardware.sku`, and through the
++/// kernel's command line where the property area has it not -- a ramdisk that
++/// holds several phones' configurations reads it before anything is mounted.
++#[cfg(target_os = "android")]
++fn device_config() -> Result<DeviceConfig> {
++    let named = skyward_sys::prop("ro.boot.hardware.sku")
++        .or_else(|| skyward_sys::prop("ro.boot.product.hardware.sku"))
++        .or_else(|| cmdline_value("androidboot.hardware.sku"))
++        .map(|name| name.trim().to_string())
++        .filter(|name| !name.is_empty());
++    if let Some(name) = &named {
++        let at = format!("/skyward/device-{name}.toml");
++        if Path::new(&at).is_file() {
++            skyward_sys::kmsg(&format!("the configuration for {name} is the one this ramdisk carries"))?;
++            return DeviceConfig::load(at);
++        }
++        skyward_sys::kmsg(&format!("this ramdisk carries no configuration for {name}; the one it was built with is used"))?;
++    } else {
++        skyward_sys::kmsg("the phone names itself nowhere; the configuration the ramdisk was built with is used")?;
++    }
++    DeviceConfig::load(Path::new("/").join(ramdisk::CONFIG))
++}
++
++/// What the kernel was told at `key=`, where it was told it.
++#[cfg(target_os = "android")]
++fn cmdline_value(key: &str) -> Option<String> {
++    let line = std::fs::read_to_string("/proc/cmdline").ok()?;
++    line.split_whitespace()
++        .find_map(|word| word.strip_prefix(key)?.strip_prefix('=').map(str::to_string))
++}
++
  /// Map and mount the slot's partitions from super, then bring up what runs
  /// from them. Recovery has to stay usable when super cannot be mounted, as
  /// after it is wiped, so the reason goes to the kernel log instead.
-diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/remember.rs 构建/skyward-0.2.0/crates/skyward/src/remember.rs
---- /tmp/pristine2/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
-+++ 构建/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/remember.rs
+--- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
 @@ -0,0 +1,60 @@
 +//! The screen lock a user chose to have kept, so that the data partition
 +//! opens as the recovery starts rather than waiting for it to be typed.
@@ -153,9 +203,9 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/remember.rs 构建/sky
 +        Err(e) => Err(e).with_context(|| format!("remove {FILE}")),
 +    })
 +}
-diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/ui.rs 构建/skyward-0.2.0/crates/skyward/src/ui.rs
---- /tmp/pristine2/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
-+++ 构建/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-10 12:43:40.299999946 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/ui.rs
+--- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-10 15:25:37.935999970 +0000
 @@ -3,6 +3,7 @@
  use crate::filework;
  use crate::haptics::Haptics;
@@ -195,7 +245,25 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/ui.rs 构建/skyward-0
      let mut arriving = Some(Incoming::Arrived);
      // The mount page shows the partitions as they are when it opens and
      // after each change; why they cannot be read is the page's to say.
-@@ -1383,8 +1392,17 @@
+@@ -1374,6 +1383,17 @@
+     let mut drive_at = Instant::now();
+     loop {
+         let now = monotonic_ms();
++        // The data page says it waits for the phone's own parts until they are
++        // up; the work behind it says when that is.
++        if !app.state.prepared && crate::prepared() {
++            app.state.prepared = true;
++            // The boot control is one of the services brought up behind the
++            // page, so what starts next can only be read once they are up:
++            // read again now, rather than leave the page saying it is
++            // unreadable until someone opens the slot page.
++            app.set_boot_slots(read_slots());
++            app.refresh();
++        }
+         if leave_at.is_some_and(|at| now >= at) {
+             leave_at = None;
+             power(leave)?;
+@@ -1383,8 +1403,17 @@
              if !inputs.has_panel() {
                  skyward_sys::kmsg("no touch panel came up; the pages are worked with the keys")?;
                  app.touchscreen_missing();
@@ -213,7 +281,7 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/ui.rs 构建/skyward-0
          for fx in app.tick(now) {
              match fx {
                  Effect::Haptic => {
-@@ -2035,6 +2053,20 @@
+@@ -2035,6 +2064,20 @@
                      }
                      closed = opening.closed;
                      show_closed(&mut app, &closed)?;
@@ -234,7 +302,7 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/ui.rs 构建/skyward-0
                  }
                  decrypt::Ended::Opened(Err(why)) => {
                      skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
-@@ -2051,11 +2083,42 @@
+@@ -2051,11 +2094,42 @@
                      app.data_failed(why);
                  }
                  decrypt::Ended::Unlocked(Ok(still)) => {
@@ -277,7 +345,7 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/ui.rs 构建/skyward-0
                      app.unlock_failed(why, now);
                  }
              }
-@@ -2295,13 +2358,28 @@
+@@ -2295,13 +2369,28 @@
                      // under way, and takes nothing more until it is done.
                      Effect::OpenData => {
                          ensure!(decryptor.is_none(), "the data partition is being opened already");
@@ -307,10 +375,33 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward/src/ui.rs 构建/skyward-0
                      Effect::ReadDir(folder) => list(&mut app, folder)?,
                      Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,
                      // A name taken where an entry goes is the user's to
-diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-crypto/src/data.rs 构建/skyward-0.2.0/crates/skyward-crypto/src/data.rs
---- /tmp/pristine2/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
-+++ 构建/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 11:46:16.603999966 +0000
-@@ -364,6 +364,32 @@
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-crypto/src/data.rs
+--- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
+@@ -32,6 +32,12 @@
+ /// The phone's owner, the first of its users.
+ const OWNER: u32 = 0;
+ 
++/// The second space HyperOS keeps: a user of its own, whose files are kept
++/// behind the owner's credential. Opening them is a second unlock, behind the
++/// one the page asked for, and one that can leave the page waiting; the
++/// recovery leaves them closed.
++const SECOND_SPACE: u32 = 999;
++
+ /// The key is in a directory of this name under the one the phone names.
+ const KEY_DIR: &str = "key";
+ 
+@@ -213,6 +219,9 @@
+     let mut closed = Vec::new();
+     let mut owner = Note::default();
+     for user in open_users(service)? {
++        if user == SECOND_SPACE {
++            continue;
++        }
+         let protector = protector(user)?;
+         match protector.lock {
+             None => {
+@@ -364,6 +373,32 @@
              ),
          },
      };
@@ -343,7 +434,7 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-crypto/src/data.rs 构建/
      // A user who has set a screen lock has what the phone recorded about
      // it beside the blob; a user who has set none has nothing there.
      let recorded = dir.join(format!("{id}.pwd"));
-@@ -385,7 +411,7 @@
+@@ -385,7 +420,7 @@
      Ok(crate::user::Protector {
          blob: std::fs::read(dir.join(format!("{id}.spblob"))).with_context(|| format!("read the blob in {}", dir.display()))?,
          bound,
@@ -352,9 +443,33 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-crypto/src/data.rs 构建/
          lock,
      })
  }
-diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/app.rs 构建/skyward-0.2.0/crates/skyward-ui/src/app.rs
---- /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
-+++ 构建/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-10 12:43:40.299999946 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-modules/src/lib.rs
+--- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-10 15:01:41.143999884 +0000
+@@ -25,6 +25,10 @@
+ /// loaded. Returns the files loaded, dependencies first.
+ pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
+     let mut loaded = Vec::new();
++    // A module two of the requested ones lean on is in the order of both, and
++    // handing it to the kernel twice says nothing the first time did not: each
++    // file is loaded once, whatever asked for it.
++    let mut done = BTreeSet::new();
+     for name in names {
+         let file = format!("{name}.ko");
+         let dir = dirs
+@@ -36,6 +40,9 @@
+             let path = graph
+                 .resolve_path(&m)
+                 .ok_or_else(|| anyhow!("{m} is listed in {}/modules.dep but missing", dir.display()))?;
++            if !done.insert(path.clone()) {
++                continue;
++            }
+             insmod(&path, "")?;
+             loaded.push(path);
+         }
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-ui/src/app.rs
+--- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-10 15:02:23.523999868 +0000
 @@ -1169,6 +1169,8 @@
      Skip,
      /// Try opening the data partition again, after it did not open.
@@ -364,25 +479,29 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/app.rs 构建/skywa
      Back,
      Theme { dark: bool },
      Toggle(Switch),
-@@ -1671,6 +1673,9 @@
+@@ -1671,6 +1673,12 @@
      /// lock its users' own files wait on.
      pub data: Data,
      pub code: String,
 +    /// Whether the screen lock is kept, so that the data partition opens as
 +    /// the recovery starts next time.
 +    pub remember: bool,
++    /// Whether the phone's own partitions and services are up. Until they
++    /// are, the data page says it waits for them.
++    pub prepared: bool,
      /// What is typed in the search field.
      pub search: String,
      /// The on-screen keyboard's layer.
-@@ -1799,6 +1804,7 @@
+@@ -1799,6 +1807,8 @@
              system_notice: None,
              data: Data::Closed,
              code: String::new(),
 +            remember: false,
++            prepared: false,
              search: String::new(),
              layer: Layer::Letters,
              held: None,
-@@ -2011,6 +2017,8 @@
+@@ -2011,6 +2021,8 @@
      /// knows, telling what waits with [`App::data_waiting`] or why it did
      /// not open with [`App::data_failed`].
      OpenData,
@@ -391,7 +510,7 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/app.rs 构建/skywa
      /// Open the own files of `user` with what they entered at their screen
      /// lock, telling what still waits with [`App::data_waiting`] or why it
      /// did not open with [`App::unlock_failed`].
-@@ -5137,6 +5145,11 @@
+@@ -5137,6 +5149,11 @@
                  return self.arrive_at(s);
              }
              Action::OpenData => return self.open_data(),
@@ -403,7 +522,7 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/app.rs 构建/skywa
              Action::Skip => {
                  self.leave(true);
                  if self.stack.len() > 1 {
-@@ -6274,6 +6287,32 @@
+@@ -6274,6 +6291,32 @@
          self.dirty = true;
      }
  
@@ -436,10 +555,10 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/app.rs 构建/skywa
      /// A button went down. With the keys working the page, the volume keys
      /// move the light from control to control and the power key works the
      /// one lit as it comes back up; otherwise the first volume press lights
-diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/pages.rs 构建/skyward-0.2.0/crates/skyward-ui/src/pages.rs
---- /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
-+++ 构建/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-10 12:47:04.431999981 +0000
-@@ -687,14 +687,23 @@
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-ui/src/pages.rs
+--- /tmp/tmp.wHwdDcWxL5/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.WbTdSelIfs/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-10 15:02:36.039999863 +0000
+@@ -687,14 +687,27 @@
      let (c, l) = (page(cx), cx.state.lang);
      match &cx.state.data {
          Data::Locked { user, keys, checking } => code(cx, c, *user, *keys, *checking),
@@ -452,9 +571,13 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/pages.rs 构建/sky
 -            None,
 -        ),
 +        Data::Closed | Data::Opening => {
-+            // With the screen lock kept from before there is nothing to read:
-+            // it is that one the partition is opened with.
-+            let note = if cx.state.remember {
++            // What the page is waiting for is the phone's own partitions and
++            // services until they are up; only then is it the partition that
++            // is being opened, with the lock kept from before where there is
++            // one, and the lock itself otherwise.
++            let note = if !cx.state.prepared {
++                l.pick(["正在准备分区与服务", "正在準備分割區與服務", "Bringing the phone's own parts up"])
++            } else if cx.state.remember {
 +                l.pick(["正在用记住的密码解密", "正在用記住的密碼解密", "Decrypting with the screen lock you kept"])
 +            } else {
 +                l.pick(["正在读取锁屏方式", "正在讀取螢幕鎖定方式", "Reading the screen lock"])
@@ -471,7 +594,7 @@ diff -ruN /tmp/pristine2/skyward-0.2.0/crates/skyward-ui/src/pages.rs 构建/sky
          Data::Open => data_status(
              cx,
              c,
-@@ -798,6 +807,15 @@
+@@ -798,6 +811,15 @@
      if keys != Keys::Pattern {
          widgets::code_dots(&mut c, t, x, bottom - m.dp(92.0), s.code.chars().count());
      }
