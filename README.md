@@ -103,12 +103,12 @@ RAMDISK=/path/to/ramdisk scripts/update-upstream.sh v0.3.0
 
 `.github/workflows/build.yml`：按 tag（`v*`）或手动触发，整份 `.img` 在 GitHub 的机器上编出来。
 
-需要的仓库 secret（Settings → Secrets and variables → Actions）：
+需要的地址（Settings → Secrets and variables → Actions；`DEPOT_URL` 已配好，一般不用动）：
 
 | secret | 内容 |
 |---|---|
-| `DEPOT_URL` | 一个 tar.gz 的直链，里面要有 `ramdisk.lz4`（底座）与 `orig.img`（打包模板，原厂 recovery 镜像） |
-| `DEPOT_TOKEN` | 上面那个地址要令牌时才填，没有就留空 |
+| `DEPOT_URL` | tar.gz 的直链（本仓库已作为 `depot` release 的资产提供，变量已设好） |
+| `DEPOT_TOKEN` | 地址需要令牌时才填；本仓库是公开的，留空即可 |
 
 产出：`skyward-pudding-<日期>-<tag>-OS4.0.6.0.XPCCNXM.img` + `SHA256SUMS`，作为 artifact 留存；tag 触发时自动挂到该 tag 的 Release。
 

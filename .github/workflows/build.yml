@@ -76,7 +76,7 @@ jobs:
 
       - name: 取底座
         env:
-          DEPOT_URL: ${{ secrets.DEPOT_URL }}
+          DEPOT_URL: ${{ vars.DEPOT_URL || secrets.DEPOT_URL }}
           DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
         run: |
           set -e
