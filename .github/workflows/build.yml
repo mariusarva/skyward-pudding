@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 工具
-        run: sudo apt-get update && sudo apt-get install -y lz4 cpio
+        run: sudo apt-get update && sudo apt-get install -y lz4 cpio patch
 
       - name: Rust 与 aarch64 目标
         uses: dtolnay/rust-toolchain@stable
@@ -47,15 +47,19 @@ jobs:
 
       - name: 取上游源码并打补丁
         run: |
-          set -e
-          curl -fL --retry 3 -o upstream.tar.gz \
-            https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/v0.2.0
+          set -euxo pipefail
+          URL=https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/v0.2.0
+          echo "取 $URL"
+          curl -fL --retry 3 -o upstream.tar.gz "$URL"
+          ls -l upstream.tar.gz
           mkdir -p src
           tar xzf upstream.tar.gz -C src --strip-components=1
+          ls src | head
           PATCH=$(ls -1 patches/skyward-pudding-*.patch | sort -V | tail -1)
           echo "补丁：$PATCH"
           cd src
-          patch -p1 < "../$PATCH"
+          patch --version | head -1
+          patch -p1 --batch --forward --no-backup-if-mismatch < "../$PATCH"
 
       - name: 交叉编译
         run: |
