@@ -98,6 +98,39 @@ RAMDISK=/path/to/ramdisk scripts/update-upstream.sh v0.3.0
 
 补丁冲突的文件清单与手工合并办法见 `docs/开发记录.md` 第 11 节。
 
+
+## 用 GitHub Actions 构建
+
+`.github/workflows/build.yml`：按 tag（`v*`）或手动触发，整份 `.img` 在 GitHub 的机器上编出来。
+
+需要的仓库 secret（Settings → Secrets and variables → Actions）：
+
+| secret | 内容 |
+|---|---|
+| `DEPOT_URL` | 一个 tar.gz 的直链，里面要有 `ramdisk.lz4`（底座）与 `orig.img`（打包模板，原厂 recovery 镜像） |
+| `DEPOT_TOKEN` | 上面那个地址要令牌时才填，没有就留空 |
+
+产出：`skyward-pudding-<日期>-<tag>-OS4.0.6.0.XPCCNXM.img` + `SHA256SUMS`，作为 artifact 留存；tag 触发时自动挂到该 tag 的 Release。
+
+**动手前要准备的两样**（都不进仓库）：
+
+```sh
+# 1) 底座的 ramdisk（任意一份打包好的都能用，CI 会换掉里面的 recovery）
+lz4 -l -12 ramdisk.cpio ramdisk.lz4
+
+# 2) 打包模板：把原厂 recovery 镜像裁成 avbwrap.py 需要的最小长度
+python3 - <<'EOF'
+import struct
+d = open('orig.img','rb').read()
+ks, rs, _, _ = struct.unpack_from('<IIII', d, 8)
+L = ((4096 + rs) + 4095) // 4096 * 4096
+mini = bytearray(d[:1584]) + bytearray(L - 1584) + bytearray(d[L:L+512]) + bytearray(d[-64:])
+open('orig-min.img','wb').write(bytes(mini))
+EOF
+
+tar czf depot.tar.gz ramdisk.lz4 orig-min.img   # 上传这个，把直链填进 DEPOT_URL
+```
+
 ## 版本号的写法
 
 从 `v0.2.27` 起用**三段式**（与上游 `kirklin/skyward` 一致）：semver 要 `主.次.修订`，纯数字 tag 会让更新检查解析失败。早先的 `v25`/`v26`/`v27` 是纯数字，解析器现在也容错，但新版本一律三段式。

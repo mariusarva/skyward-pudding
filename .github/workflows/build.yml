@@ -1,0 +1,119 @@
+name: build
+
+# 按 tag 构建整份镜像；也可以在 Actions 页面手动触发。
+#
+# 需要两个仓库 secret（Settings → Secrets and variables → Actions）：
+#   DEPOT_URL    底座包的下载地址（一个 tar.gz，里面至少要有）
+#                   ramdisk.lz4   已解开的 ramdisk 用 lz4 -l -12 压出来的那份
+#                   orig.img      打包用的模板（原厂 recovery 镜像，avbwrap.py 要读它的头和 AVB 模板）
+#   DEPOT_TOKEN  DEPOT_URL 需要的令牌，没有就留空
+#
+# 产出的 out.img 既作为 artifact 留存，tag 触发时还会挂到该 tag 的 Release 上。
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release:
+        description: '写进二进制的发布号，例如 0.2.33'
+        required: true
+        default: '0.2.33'
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 工具
+        run: sudo apt-get update && sudo apt-get install -y lz4 cpio
+
+      - name: Rust 与 aarch64 目标
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Android NDK
+        uses: android-actions/setup-android@v3
+
+      - name: 取上游源码并打补丁
+        run: |
+          set -e
+          curl -fL --retry 3 -o upstream.tar.gz \
+            https://codeload.github.com/kirklin/skyward/tar.gz/refs/tags/v0.2.0
+          mkdir -p src
+          tar xzf upstream.tar.gz -C src --strip-components=1
+          PATCH=$(ls -1 patches/skyward-pudding-*.patch | sort -V | tail -1)
+          echo "补丁：$PATCH"
+          cd src
+          patch -p1 < "../$PATCH"
+
+      - name: 交叉编译
+        run: |
+          set -e
+          NDK="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/$(ls "$ANDROID_HOME/ndk" | tail -1)}"
+          SYSROOT="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          BUILTINS=$(dirname "$(find "$NDK/toolchains/llvm/prebuilt/linux-x86_64/lib/clang" \
+            -name 'libclang_rt.builtins-aarch64-android.a' | head -1)")
+          cat > /tmp/cc-aarch64.sh <<EOF
+          #!/bin/sh
+          exec clang --target=aarch64-linux-android30 --sysroot="$SYSROOT" -rtlib=compiler-rt -L"$BUILTINS" "\$@"
+          EOF
+          chmod +x /tmp/cc-aarch64.sh
+          RELEASE="${{ github.event.inputs.release || github.ref_name }}"
+          RELEASE="${RELEASE#v}"
+          echo "发布号：$RELEASE"
+          export CC_aarch64_linux_android=/tmp/cc-aarch64.sh
+          export AR_aarch64_linux_android=ar
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/tmp/cc-aarch64.sh
+          export SKYWARD_RELEASE="$RELEASE"
+          cd src
+          cargo build --release -p skyward --target aarch64-linux-android
+
+      - name: 取底座
+        env:
+          DEPOT_URL: ${{ secrets.DEPOT_URL }}
+          DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+        run: |
+          set -e
+          [ -n "$DEPOT_URL" ] || { echo "没有 DEPOT_URL" >&2; exit 1; }
+          if [ -n "$DEPOT_TOKEN" ]; then
+            curl -fL --retry 3 -H "Authorization: Bearer $DEPOT_TOKEN" -o depot.tgz "$DEPOT_URL"
+          else
+            curl -fL --retry 3 -o depot.tgz "$DEPOT_URL"
+          fi
+          mkdir -p depot && tar xzf depot.tgz -C depot
+          ls -l depot
+
+      - name: 换进 ramdisk 并补 AVB
+        run: |
+          set -e
+          lz4 -d -f depot/ramdisk.lz4 base.cpio
+          mkdir -p root
+          (cd root && cpio -idm --quiet < ../base.cpio)
+          cp src/target/aarch64-linux-android/release/skyward root/system/bin/recovery
+          chmod 755 root/system/bin/recovery
+          (cd root && find . -print0 | cpio --null -o -H newc --owner=0:0 --reproducible > ../new.cpio 2>/dev/null)
+          lz4 -l -12 -f new.cpio ramdisk_new.lz4
+          cp depot/orig.img orig.img
+          NAME="skyward-pudding-$(date +%Y%m%d)-${{ github.ref_name }}-OS4.0.6.0.XPCCNXM.img"
+          python3 scripts/avbwrap.py ramdisk_new.lz4 "$NAME"
+          sha256sum "$NAME" | tee SHA256SUMS
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image
+          path: |
+            skyward-pudding-*.img
+            SHA256SUMS
+
+      - name: 挂到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" skyward-pudding-*.img SHA256SUMS --clobber
