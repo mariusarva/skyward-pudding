@@ -1,0 +1,3038 @@
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward/src/backup.rs b/crates/skyward/src/backup.rs
+--- a/crates/skyward/src/backup.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward/src/backup.rs	2026-11-11 06:05:41.560999924 +0000
+@@ -423,8 +423,11 @@
+                     copied.with_context(|| format!("back up {name}"))?;
+                 }
+                 Source::Data => {
+-                    archive::pack(Path::new(DATA), &skipped, &mut writer, cancel, &mut |done| telling.done(done))
++                    let locked = archive::pack(Path::new(DATA), &skipped, &mut writer, cancel, &mut |done| telling.done(done))
+                         .context("back up the data partition's files")?;
++                    if locked > 0 {
++                        skyward_sys::kmsg(&format!("{locked} files needed a key the recovery does not hold; left out of the backup"))?;
++                    }
+                 }
+             }
+             items.push(Item { part: *part, name: name.clone(), stored: writer.finish()? });
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward/src/decrypt.rs b/crates/skyward/src/decrypt.rs
+--- a/crates/skyward/src/decrypt.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward/src/decrypt.rs	2026-11-11 08:25:16.503999858 +0000
+@@ -33,6 +33,7 @@
+ 
+ impl Decryptor {
+     pub fn start(job: Job) -> Result<Decryptor> {
++        data::restart();
+         let mut fds = [0; 2];
+         if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) } != 0 {
+             return Err(std::io::Error::last_os_error()).context("make the decrypting thread's wake pipe");
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward/src/input.rs b/crates/skyward/src/input.rs
+--- a/crates/skyward/src/input.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward/src/input.rs	2026-11-11 08:27:18.727999811 +0000
+@@ -8,6 +8,7 @@
+ use std::ffi::CString;
+ use std::fs;
+ use std::io::{self, ErrorKind};
++use std::sync::atomic::{AtomicUsize, Ordering};
+ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+ use std::path::PathBuf;
+ 
+@@ -16,6 +17,9 @@
+     Touch(Touch, u64),
+     /// A button going down, or coming back up.
+     Key(Key, bool),
++    /// The touchscreen's double tap: the panel saw two taps while it was in
++    /// its low-power state and reported the wakeup key for them.
++    Wake,
+ }
+ 
+ /// Milliseconds on the monotonic clock, which the touch panel stamps its
+@@ -35,7 +39,35 @@
+     Ok(())
+ }
+ 
+-const KEYS: [KeyCode; 4] = [KeyCode::KEY_POWER, KeyCode::KEY_VOLUMEUP, KeyCode::KEY_VOLUMEDOWN, KeyCode::KEY_BACK];
++const KEYS: [KeyCode; 5] =
++    [KeyCode::KEY_POWER, KeyCode::KEY_VOLUMEUP, KeyCode::KEY_VOLUMEDOWN, KeyCode::KEY_BACK, KeyCode::KEY_WAKEUP];
++
++/// How far apart two double taps must be for both to be taken: the panel
++/// reports one wakeup key per gesture, and a gesture repeated within this
++/// many milliseconds is the same one reported twice.
++const WAKE_GAP_MS: u64 = 400;
++
++/// Where the events the panel itself reports are written, for a page whose
++/// panel will not light: /metadata outlives the recovery, the console does not.
++const JOURNAL: &str = "/metadata/skyward/input";
++
++/// How many lines the journal takes before it stops, so a long touch cannot
++/// fill the partition it is on.
++const JOURNAL_LINES: usize = 4000;
++
++static WRITTEN: AtomicUsize = AtomicUsize::new(0);
++
++/// Put a line about what the panel reported where it can be read afterwards.
++fn journal(text: &str) {
++    let _ = skyward_sys::kmsg(text);
++    if WRITTEN.fetch_add(1, Ordering::Relaxed) >= JOURNAL_LINES {
++        return;
++    }
++    use std::io::Write as _;
++    if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(JOURNAL) {
++        let _ = writeln!(file, "{text}");
++    }
++}
+ 
+ fn key_of(code: KeyCode) -> Option<Key> {
+     match code {
+@@ -82,6 +114,8 @@
+     /// The kernel dropped events that were not read in time; what arrives
+     /// up to the next report is incomplete.
+     dropped: bool,
++    /// When the last double tap was taken, on [`monotonic_ms`]'s clock.
++    last_wake: Option<u64>,
+ }
+ 
+ impl Panel {
+@@ -108,8 +142,20 @@
+             return Err(io::Error::last_os_error()).context("stamp touch events with the monotonic clock");
+         }
+         set_nonblocking(dev.as_raw_fd()).context("make touch non-blocking")?;
+-        let mut panel =
+-            Panel { dev, path, x_range, y_range, slots, slot: 0, down: false, was_down: false, raw: (0, 0), moved: false, dropped: false };
++        let mut panel = Panel {
++            dev,
++            path,
++            x_range,
++            y_range,
++            slots,
++            slot: 0,
++            down: false,
++            was_down: false,
++            raw: (0, 0),
++            moved: false,
++            dropped: false,
++            last_wake: None,
++        };
+         // The kernel drops a position equal to the one a slot already holds,
+         // so a touch landing where the last one lifted carries no position;
+         // start from what the panel holds now.
+@@ -158,9 +204,28 @@
+                     self.was_down = self.down;
+                     self.moved = false;
+                 }
++                // The panel's double tap: the driver reports the wakeup key
++                // for it, once per gesture, and only on the way down.
++                EventSummary::Key(_, KeyCode::KEY_WAKEUP, 1) => {
++                    let time = e.as_ref().time;
++                    let at = time.tv_sec as u64 * 1000 + time.tv_usec as u64 / 1000;
++                    if self.last_wake.is_none_or(|last| at.saturating_sub(last) > WAKE_GAP_MS) {
++                        self.last_wake = Some(at);
++                        out.push(Event::Wake);
++                    }
++                }
+                 _ if self.dropped => {}
++                // What the panel reports besides a finger: a key or a switch
++                // of its own, which is where a gesture would show, and the
++                // finger lifted, which is what a tap reports besides its press.
++                EventSummary::Key(_, code, value) => journal(&format!("KEY {code:?} {value}")),
++                EventSummary::Misc(_, code, value) => journal(&format!("MISC {code:?} {value}")),
++                EventSummary::Switch(_, code, value) => journal(&format!("SWITCH {code:?} {value}")),
+                 EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_MT_SLOT, v) => self.slot = v,
+-                EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_MT_TRACKING_ID, v) if self.slot == 0 => self.down = v >= 0,
++                EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_MT_TRACKING_ID, v) if self.slot == 0 => {
++                    journal(&format!("TRACKING {v}"));
++                    self.down = v >= 0;
++                }
+                 EventSummary::AbsoluteAxis(_, AbsoluteAxisCode::ABS_MT_POSITION_X, v) if self.slot == 0 => {
+                     self.raw.0 = v;
+                     self.moved = true;
+@@ -239,7 +304,9 @@
+                 .supported_absolute_axes()
+                 .is_some_and(|a| a.contains(AbsoluteAxisCode::ABS_MT_POSITION_X) && a.contains(AbsoluteAxisCode::ABS_MT_POSITION_Y));
+             let keys = dev.supported_keys().is_some_and(|k| KEYS.iter().any(|c| k.contains(*c)));
+-            eprintln!("input {}: {:?} direct={direct} multitouch={mt} keys={keys}", path.display(), dev.name().unwrap_or("?"));
++            let line = format!("input {}: {:?} direct={direct} multitouch={mt} keys={keys}", path.display(), dev.name().unwrap_or("?"));
++            eprintln!("{line}");
++            journal(&line);
+             if direct && mt && self.panel.is_none() {
+                 self.wakeful.add(dev.as_raw_fd())?;
+                 self.panel = Some(Panel::new(path, dev)?);
+@@ -310,7 +377,11 @@
+                     // the UI times its own.
+                     for e in events {
+                         if let EventSummary::Key(_, code, value @ (0 | 1)) = e.destructure() {
+-                            if let Some(k) = key_of(code) {
++                            if code == KeyCode::KEY_WAKEUP {
++                                if value == 1 {
++                                    out.push(Event::Wake);
++                                }
++                            } else if let Some(k) = key_of(code) {
+                                 out.push(Event::Key(k, value == 1));
+                             }
+                         }
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
+--- a/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward/src/main.rs	2026-11-11 08:52:15.178786007 +0000
+@@ -26,6 +26,8 @@
+ #[cfg(target_os = "android")]
+ mod relabel;
+ #[cfg(target_os = "android")]
++mod remember;
++#[cfg(target_os = "android")]
+ mod secure;
+ #[cfg(target_os = "android")]
+ mod services;
+@@ -41,6 +43,8 @@
+ mod wipe;
+ #[cfg(target_os = "android")]
+ mod wlan;
++#[cfg(target_os = "android")]
++mod wlanmem;
+ 
+ #[derive(Parser)]
+ #[command(name = "skyward", version, about = "Skyward recovery")]
+@@ -513,6 +517,16 @@
+     for path in load_modules(cfg, &cfg.modules.load)? {
+         skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
+     }
++    skyward_ui::progress::reached(skyward_ui::progress::DRIVERS);
++    // The WLAN's driver takes about eleven seconds to make its interface.
++    // Given its modules here, that time is spent while the services come up.
++    if let Some(wlan) = &cfg.wlan {
++        let dirs = cfg.modules.sources.iter().map(|s| skyward_modules::source_dir(s)).collect::<Result<Vec<_>>>()?;
++        match crate::wlan::warm_up(wlan, &dirs) {
++            Ok(()) => skyward_sys::kmsg("the WLAN's driver is told it may start")?,
++            Err(e) => skyward_sys::kmsg(&format!("the WLAN's driver is not started yet: {e:#}"))?,
++        }
++    }
+     if !cfg.owners.is_empty() {
+         let handed = hand_over(&cfg.owners)?;
+         skyward_sys::kmsg(&format!("{handed} of the phone's own files handed to the accounts its init gives them"))?;
+@@ -533,12 +547,14 @@
+     if !registering.is_empty() || !files.is_empty() {
+         let described = secure::publish_descriptions(&registering, &files)?;
+         skyward_sys::kmsg(&format!("{described} of the phone's own service descriptions published"))?;
++        skyward_ui::progress::reached(skyward_ui::progress::DESCRIPTIONS);
+     }
+     let libraries = secure::libraries()?;
+     if let Some(dir) = &libraries {
+         skyward_sys::kmsg(&format!("the phone's own libraries are at {}", dir.display()))?;
+     }
+     services::start(&services, libraries.as_deref())?;
++    skyward_ui::progress::reached(skyward_ui::progress::SERVICES);
+     agree_on_the_notes_key(&registering)
+ }
+ 
+@@ -695,7 +711,7 @@
+         if !request.work.lasts() {
+             bcb::clear(&misc)?;
+         }
+-        let cfg = DeviceConfig::load(Path::new("/").join(ramdisk::CONFIG))?;
++        let cfg = device_config()?;
+         skyward_sys::kmsg(&format!(
+             "{} {} recovery up, misc command {:?} args {:?}, asking for {:?}",
+             cfg.device.codename,
+@@ -748,10 +764,30 @@
+             // erasing them, which may take super with them, and undoing
+             // shared blocks, which writes to the slot's own.
+             if !matches!(request.work, bcb::Work::Fastboot | bcb::Work::WipeAb { .. } | bcb::Work::UnshareBlocks) {
+-                prepare(&cfg, booted_slot()?)?;
++                // The screen comes up first: mapping super, mounting the slot's
++                // partitions, loading the drivers and starting the phone's own
++                // services takes seconds, and until the screen is drawn the
++                // phone looks stuck. What needs them waits for them instead --
++                // `wait_prepared` is what a page calls before it does.
++                let cfg = cfg.clone();
++                std::thread::Builder::new().name("prepare".into()).spawn(move || {
++                    let done = booted_slot()
++                        .map_err(|e| anyhow::anyhow!("{e:#}"))
++                        .and_then(|slot| prepare(&cfg, slot));
++                    if let Err(e) = done {
++                        let _ = skyward_sys::kmsg(&format!("devices not brought up: {e:#}"));
++                    }
++                    mark_prepared();
++                })?;
++            } else {
++                mark_prepared();
+             }
+             let root = Path::new("/");
+-            ui::run(&cfg, &root.join(ramdisk::FONT), &root.join(ramdisk::MONO), request, Screen::Home, None)
++            // The phone comes here to open its data partition, so that is what
++            // it is shown: the page opens the partition as it appears, and the
++            // control its screen lock is answered with is up by then. Leaving
++            // it, by its own way out or by the back key, is the menu.
++            ui::run(&cfg, &root.join(ramdisk::FONT), &root.join(ramdisk::MONO), request, Screen::Decrypt, None)
+         }
+         #[cfg(not(target_os = "android"))]
+         {
+@@ -763,6 +799,87 @@
+     })
+ }
+ 
++/// How long a page waits for the phone's own parts before it goes ahead.
++#[cfg(target_os = "android")]
++const PREPARE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
++
++#[cfg(target_os = "android")]
++struct Gate {
++    done: std::sync::Mutex<bool>,
++    cv: std::sync::Condvar,
++}
++
++#[cfg(target_os = "android")]
++static PREPARED: std::sync::OnceLock<Gate> = std::sync::OnceLock::new();
++
++#[cfg(target_os = "android")]
++fn gate() -> &'static Gate {
++    PREPARED.get_or_init(|| Gate { done: std::sync::Mutex::new(false), cv: std::sync::Condvar::new() })
++}
++
++/// Say the phone's own parts are up, or that bringing them up failed: either
++/// way nothing is gained by waiting longer.
++#[cfg(target_os = "android")]
++fn mark_prepared() {
++    skyward_ui::progress::reached(skyward_ui::progress::READY);
++    let gate = gate();
++    *gate.done.lock().unwrap_or_else(|e| e.into_inner()) = true;
++    gate.cv.notify_all();
++}
++
++/// Wait until the phone's own parts are up, and no longer than `PREPARE_WAIT`:
++/// a page that needs the partitions or the phone's services calls this first,
++/// so that the screen can be drawn before any of them are ready.
++#[cfg(target_os = "android")]
++pub(crate) fn wait_prepared() {
++    let gate = gate();
++    let done = gate.done.lock().unwrap_or_else(|e| e.into_inner());
++    if !*done {
++        let _ = gate.cv.wait_timeout(done, PREPARE_WAIT);
++    }
++}
++
++/// Whether the phone's own parts are up already, asked without waiting: a page
++/// drawn before they are says it waits for them rather than that it does the
++/// work they stand in the way of.
++#[cfg(target_os = "android")]
++pub(crate) fn prepared() -> bool {
++    *gate().done.lock().unwrap_or_else(|e| e.into_inner())
++}
++
++/// The configuration to run by: the phone's own, where the ramdisk carries one
++/// for it, and the one the ramdisk was built with otherwise. A phone names
++/// itself through the bootloader, as `ro.boot.hardware.sku`, and through the
++/// kernel's command line where the property area has it not -- a ramdisk that
++/// holds several phones' configurations reads it before anything is mounted.
++#[cfg(target_os = "android")]
++fn device_config() -> Result<DeviceConfig> {
++    let named = skyward_sys::prop("ro.boot.hardware.sku")
++        .or_else(|| skyward_sys::prop("ro.boot.product.hardware.sku"))
++        .or_else(|| cmdline_value("androidboot.hardware.sku"))
++        .map(|name| name.trim().to_string())
++        .filter(|name| !name.is_empty());
++    if let Some(name) = &named {
++        let at = format!("/skyward/device-{name}.toml");
++        if Path::new(&at).is_file() {
++            skyward_sys::kmsg(&format!("the configuration for {name} is the one this ramdisk carries"))?;
++            return DeviceConfig::load(at);
++        }
++        skyward_sys::kmsg(&format!("this ramdisk carries no configuration for {name}; the one it was built with is used"))?;
++    } else {
++        skyward_sys::kmsg("the phone names itself nowhere; the configuration the ramdisk was built with is used")?;
++    }
++    DeviceConfig::load(Path::new("/").join(ramdisk::CONFIG))
++}
++
++/// What the kernel was told at `key=`, where it was told it.
++#[cfg(target_os = "android")]
++fn cmdline_value(key: &str) -> Option<String> {
++    let line = std::fs::read_to_string("/proc/cmdline").ok()?;
++    line.split_whitespace()
++        .find_map(|word| word.strip_prefix(key)?.strip_prefix('=').map(str::to_string))
++}
++
+ /// Map and mount the slot's partitions from super, then bring up what runs
+ /// from them. Recovery has to stay usable when super cannot be mounted, as
+ /// after it is wiped, so the reason goes to the kernel log instead.
+@@ -778,6 +895,7 @@
+             }
+             // Without them the screen still shows and the keys still work,
+             // so this reason goes to the kernel log as well.
++            skyward_ui::progress::reached(skyward_ui::progress::PARTITIONS);
+             if let Err(e) = bring_up(cfg, slot) {
+                 skyward_sys::kmsg(&format!("devices not brought up: {e:#}"))?;
+             }
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward/src/remember.rs b/crates/skyward/src/remember.rs
+--- a/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
+@@ -0,0 +1,60 @@
++//! The screen lock a user chose to have kept, so that the data partition
++//! opens as the recovery starts rather than waiting for it to be typed.
++//!
++//! It is kept where the recovery keeps its own settings, readable by root
++//! alone. A factory reset formats that partition, and so does the way out of
++//! the decrypt page that forgets it.
++
++use anyhow::{Context, Result};
++use std::os::unix::fs::PermissionsExt;
++use std::path::Path;
++
++/// The partition the file is on. The recovery mounts it read-only, as the
++/// phone's own recovery does, so it is made writable for as long as this
++/// takes and then read-only again.
++const METADATA: &str = "/metadata";
++
++/// Where it is kept: beside the recovery's own settings.
++pub const FILE: &str = "/metadata/skyward/credential";
++
++/// The screen lock kept from before, where one was kept.
++pub fn read() -> Option<Vec<u8>> {
++    std::fs::read(FILE).ok().filter(|kept| !kept.is_empty())
++}
++
++/// Do `work` with the partition writable, and read-only again afterwards.
++fn writable<T>(work: impl FnOnce() -> Result<T>) -> Result<T> {
++    let at = Path::new(METADATA);
++    let mounted = skyward_block::mount::is_mount_point(at)?;
++    if mounted {
++        skyward_block::mount::remount_writable(at, true).context("make /metadata writable")?;
++    }
++    let done = work();
++    if mounted {
++        let _ = skyward_block::mount::remount_writable(at, false);
++    }
++    done
++}
++
++/// Keep `credential` for the starts that follow.
++pub fn write(credential: &[u8]) -> Result<()> {
++    writable(|| {
++    let at = Path::new(FILE);
++    if let Some(dir) = at.parent() {
++        std::fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
++    }
++    std::fs::write(at, credential).with_context(|| format!("write {}", at.display()))?;
++    std::fs::set_permissions(at, std::fs::Permissions::from_mode(0o600))
++        .with_context(|| format!("keep {} to root alone", at.display()))?;
++    Ok(())
++    })
++}
++
++/// Forget the screen lock kept from before, if there is one.
++pub fn forget() -> Result<()> {
++    writable(|| match std::fs::remove_file(FILE) {
++        Ok(()) => Ok(()),
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
++        Err(e) => Err(e).with_context(|| format!("remove {FILE}")),
++    })
++}
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
+--- a/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward/src/ui.rs	2026-11-11 11:21:01.758999971 +0000
+@@ -3,6 +3,8 @@
+ use crate::filework;
+ use crate::haptics::Haptics;
+ use crate::relabel;
++use crate::remember;
++use crate::wlanmem;
+ use crate::input::{monotonic_ms, Event, Inputs};
+ use crate::merge;
+ use crate::partwork;
+@@ -36,8 +38,8 @@
+ use skyward_systems::Who;
+ use skyward_ui::app::{
+     App, Asked, BackupAt, BackupEnd, BackupEntry, BackupRefusal, ClashChoice, Data, DownloadEnd, Effect, EraseStop, FileKind, FileOp,
+-    FileRow, FileTask, FsAction, FsRow, Have, Held, ItemEnd, ItemState, JobEnd, Keys, MountFailure, Part, PartKind, PartStop, Place,
+-    RenameRefused, Screen, Shot, SkywardEnd, SkywardStage, Target, UsbDrive, UsbLink, Wipe, DATA_OPENING, DATA_PARTITION, DOWNLOADS,
++    FileRow, FileTask, FsAction, FsRow, Have, Held, ItemEnd, ItemState, JobEnd, Key, Keys, MountFailure, Part, PartKind, PartStop, Place,
++    RenameRefused, Screen, Shot, SkywardEnd, SkywardStage, Target, Touch, UsbDrive, UsbLink, Wipe, DATA_OPENING, DATA_PARTITION, DOWNLOADS,
+     INSTALL_UNFINISHED, USB_DRIVE,
+ };
+ use skyward_ui::settings::Keeper;
+@@ -62,12 +64,43 @@
+ 
+ /// How long after the screen starts a touch panel may still come up; with
+ /// none by then, the pages are worked with the keys, their light shown.
+-const TOUCH_WAIT: Duration = Duration::from_secs(5);
++const TOUCH_WAIT: Duration = Duration::from_secs(10);
+ 
+-/// How long a panel gone dark rests, ready to light again at once, before
+-/// the display turns off; the phone's own system keeps its panel dozing
+-/// about as long after the screen goes off.
+-const REST: Duration = Duration::from_secs(5);
++/// How quickly a second tap on a dark panel must follow the first for the
++/// pair to be taken as a double tap, and how far it may land from it, in
++/// screen pixels.
++const DOUBLE_TAP_MS: u64 = 600;
++const DOUBLE_TAP_SLOP: f32 = 300.0;
++
++/// Where the display says what it did, in a file that outlives a restart: a
++/// page whose panel will not light cannot be asked to export its logs, so the
++/// transitions are written here as they happen, where the system that follows
++/// can still read them.
++const DISPLAY_NOTE: &str = "/metadata/skyward/display";
++
++/// Say what the display did: to the kernel log, and to the file a restart
++/// keeps. Writing the file is best effort -- a page that cannot write it still
++/// works.
++fn note(text: &str) -> Result<()> {
++    skyward_sys::kmsg(text)?;
++    let at = Path::new(DISPLAY_NOTE);
++    if let Some(dir) = at.parent() {
++        let _ = fs::create_dir_all(dir);
++        let metadata = Path::new("/metadata");
++        let mounted = skyward_block::mount::is_mount_point(metadata).unwrap_or(false);
++        if mounted {
++            let _ = skyward_block::mount::remount_writable(metadata, true);
++        }
++        if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(at) {
++            use std::io::Write;
++            let _ = writeln!(file, "{text}");
++        }
++        if mounted {
++            let _ = skyward_block::mount::remount_writable(metadata, false);
++        }
++    }
++    Ok(())
++}
+ 
+ /// Where logs saved to the temporary folder go, in the recovery service's
+ /// own folder, and where in internal storage the others do.
+@@ -982,6 +1015,9 @@
+     Options { keep: app.state.keep_recovery && app.state.recovery_partitions, signed: app.state.check_signature }
+ }
+ 
++/// How often the network kept is looked for while the WLAN waits to join it.
++const LOOKING_FOR: Duration = Duration::from_secs(3);
++
+ /// How often the WLAN page scans while it shows.
+ const SCAN_EVERY: Duration = Duration::from_secs(10);
+ 
+@@ -1054,9 +1090,13 @@
+     let mut surface = KmsSurface::open("/dev/dri/card0")?;
+     let (w, h) = surface.size();
+     eprintln!("display {}", surface.describe());
++    // Which build is running, and on what display: a page that will not light
++    // is read from this log, so what wrote it has to be in it.
++    note(&format!("skyward {} up, the display {}", skyward_info::RELEASE, surface.describe()))?;
+     let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;
+     let started = Instant::now();
+     let mut touch_known = false;
++    let mut said_missing = false;
+     // adbd and fastbootd ask over it to go over to fastboot and back.
+     let control = Control::open()?;
+     let mut haptics = cfg.haptics.as_ref().map(Haptics::open).transpose()?;
+@@ -1104,7 +1144,17 @@
+     // Opening the data partition, or a user's own files in it, under way,
+     // and the users whose own files are still closed once it is open.
+     let mut decryptor: Option<Decryptor> = None;
++    // The opening asked for before the phone's own parts are up: it starts as
++    // soon as they are, without the screen standing still until then.
++    let mut pending_open: Option<decrypt::Job> = None;
+     let mut closed: Vec<Closed> = Vec::new();
++    // The screen lock kept from before, where one was kept, so that the data
++    // partition opens as the recovery starts.
++    let mut remembered: Option<Vec<u8>> = remember::read();
++    let mut tried_remembered = false;
++    let mut attempt_was_remembered = false;
++    let mut last_credential: Option<Vec<u8>> = None;
++    app.state.remember = remembered.is_some();
+     let mut arriving = Some(Incoming::Arrived);
+     // The mount page shows the partitions as they are when it opens and
+     // after each change; why they cannot be read is the page's to say.
+@@ -1124,8 +1174,29 @@
+     // Whether the panel's frame memory has been blacked out for an off
+     // panel; cleared once a real frame is shown again.
+     let mut blanked = false;
+-    // When the panel gone dark began to rest.
+-    let mut rested_at: Option<Instant> = None;
++    // Where the display stands, for the log: whether it is lit, when it went
++    // dark, and whether the phone was let sleep.
++    let mut was_lit = true;
++    let mut dark_at: Option<Instant> = None;
++    let mut could_sleep = false;
++    // Whether the page has said, for the dark stretch it is in, that the panel
++    // is left running.
++    let mut keeps_running = false;
++    // When the decrypt page's state was last written to the log, so that a
++    // page whose bar or ring does not move can be seen for what it is.
++    let mut decrypt_logged = Instant::now();
++    // How many turns of the loop have been taken since the decrypt page was
++    // last written to the log.
++    let mut ticks: u64 = 0;
++    // When the control centre was last written to the log.
++    let mut shade_logged = Instant::now();
++    // The last tap taken on a dark panel: where it landed and when, on the
++    // clock the panel stamps its events by, for the double tap that lights
++    // it. The panel reports touches while the page is dark, but reports the
++    // wakeup key only when the firmware itself is put in its gesture mode,
++    // which the page does not reach; two taps in quick succession are taken
++    // as the double tap the phone's own system lights up to.
++    let mut last_tap: Option<(f32, f32, u64)> = None;
+     // Started for fastboot, the port goes to the phone's own fastbootd. The
+     // page says whether it came up and how far a computer has the port;
+     // why it did not come up goes to the kernel log and on screen.
+@@ -1355,6 +1426,18 @@
+         None => None,
+     };
+     let mut scanned_at = Instant::now();
++    // The WLAN kept: whether it opens as the recovery starts, and the network
++    // it joins by itself with the password that worked.
++    let wlan_settings = wlanmem::read();
++    let mut wlan_saved = wlan_settings.saved.clone();
++    app.state.wlan_auto = wlan_settings.auto;
++    app.state.wlan_keep = wlan_settings.keep;
++    let mut wlan_opened = false;
++    let mut wlan_joined = false;
++    let mut wlan_retries = 0u32;
++    let mut wlan_failed_at: Option<Instant> = None;
++    let mut wlan_password: Option<String> = None;
++    let mut wlan_kept = false;
+     app.state.update_server = cfg.update.is_some();
+     // Asking the update server, and downloading the full package.
+     let mut checker: Option<updates::Worker> = None;
+@@ -1374,6 +1457,17 @@
+     let mut drive_at = Instant::now();
+     loop {
+         let now = monotonic_ms();
++        // The data page says it waits for the phone's own parts until they are
++        // up; the work behind it says when that is.
++        if !app.state.prepared && crate::prepared() {
++            app.state.prepared = true;
++            // The boot control is one of the services brought up behind the
++            // page, so what starts next can only be read once they are up:
++            // read again now, rather than leave the page saying it is
++            // unreadable until someone opens the slot page.
++            app.set_boot_slots(read_slots());
++            app.refresh();
++        }
+         if leave_at.is_some_and(|at| now >= at) {
+             leave_at = None;
+             power(leave)?;
+@@ -1383,8 +1477,17 @@
+             if !inputs.has_panel() {
+                 skyward_sys::kmsg("no touch panel came up; the pages are worked with the keys")?;
+                 app.touchscreen_missing();
++                said_missing = true;
+             }
+         }
++        // The driver of this phone's touchscreen brings its input device up
++        // seconds after the module is loaded; until then the pages are worked
++        // with the keys, and touches are taken again once it is there.
++        if said_missing && inputs.has_panel() {
++            said_missing = false;
++            skyward_sys::kmsg("the touch panel came up; the pages take touches again")?;
++            app.touchscreen_found();
++        }
+         for fx in app.tick(now) {
+             match fx {
+                 Effect::Haptic => {
+@@ -1392,6 +1495,13 @@
+                         h.click(app.state.vibration)?;
+                     }
+                 }
++                // A screenshot the page asked for as time went by, taken of the
++                // frame on the panel now that the control centre is out of it.
++                Effect::Screenshot { storage } => {
++                    let saved = save_screenshot(&screen, storage, app.state.time_zone).map_err(|e| format!("{e:#}"));
++                    eprintln!("screenshot {saved:?}");
++                    app.screenshot_saved(saved, now);
++                }
+                 // The power key held past its wait for volume down turns
+                 // the screen off.
+                 Effect::Ticks => {
+@@ -1405,6 +1515,8 @@
+         let time = clock(app.state.time_zone)?;
+         if time != shown_clock {
+             shown_clock = time;
++            let date = skyward_ui::fmt::date(app.state.lang, unix_now()?, app.state.time_zone);
++            app.set_date(date);
+             app.redraw();
+         }
+         for reading in readings.taken() {
+@@ -1440,10 +1552,22 @@
+             port_at = Instant::now();
+         }
+         let panel = app.panel(now);
++        let lit = panel.is_some();
++        if lit != was_lit {
++            match (lit, dark_at.take()) {
++                (false, _) => {
++                    dark_at = Some(Instant::now());
++                    note("the display is dark")?;
++                }
++                (true, Some(at)) => note(&format!("the display is lit again after {} ms", at.elapsed().as_millis()))?,
++                (true, None) => note("the display is lit")?,
++            }
++            was_lit = lit;
++        }
+         let mut shown = false;
+         if panel.is_some() {
+             // A display turned off comes on again with a frame drawn for it.
+-            if app.take_dirty() || !surface.is_on() {
++            if app.take_dirty() || app.animating() || !surface.is_on() {
+                 let t0 = Instant::now();
+                 app.compose(&mut screen, &fonts, &info, &shown_clock, now);
+                 surface.present(&screen)?;
+@@ -1474,17 +1598,15 @@
+             // Lit, a panel that came on again switches to its fastest
+             // refresh.
+             surface.speed_up()?;
+-            rested_at = None;
+-        } else if surface.is_on() {
+-            // With the backlight off, the panel rests, and the touch
+-            // controller following it stops drawing power.
+-            surface.rest()?;
+-            rested_at = Some(Instant::now());
+-        } else if rested_at.is_some_and(|at| at.elapsed() >= REST) {
+-            // Rested long enough, the display goes off: the panel and the
+-            // display processor feeding it stop drawing power.
+-            surface.turn_off()?;
+-            rested_at = None;
++            keeps_running = false;
++        } else if surface.is_on() && !keeps_running {
++            // The panel is left running rather than put at rest: at rest the
++            // touchscreen stops reporting a finger on it, and with it the
++            // double tap that lights the page (2026-11-11, double tap did not
++            // light it with the panel at rest). The backlight is off, so
++            // nothing shows; the display itself keeps drawing its power.
++            note("the display is dark; the panel keeps running for the double tap")?;
++            keeps_running = true;
+         }
+         // A page at rest draws the rows it has yet to while nothing else
+         // is to be done, a band at a time, looking for input between bands.
+@@ -1495,8 +1617,7 @@
+         let floor = if shown { 0 } else { 1 };
+         let until_due = app.deadline(now).map(|d| d.saturating_sub(now) as i32);
+         // A resting panel turns off once its rest is over.
+-        let rest_left = rested_at.map(|at| REST.saturating_sub(at.elapsed()).as_millis() as i32);
+-        let timeout = if ahead { 0 } else { until_due.into_iter().chain(rest_left).min().map_or(1000, |t| t.clamp(floor, 1000)) };
++        let timeout = if ahead || app.animating() { 0 } else { until_due.map_or(1000, |t| t.clamp(floor, 1000)) };
+         // With the display off, the phone sleeps unless something needs it
+         // awake: work under way, fastboot or sideload, a restart on its way,
+         // a command running in the terminal, a network being joined, the
+@@ -1510,6 +1631,7 @@
+             || backuper.is_some()
+             || merger.is_some()
+             || decryptor.is_some()
++            || pending_open.is_some()
+             || part_worker.is_some()
+             || checker.is_some()
+             || downloader.is_some()
+@@ -1530,6 +1652,10 @@
+             && !running
+             && asked.is_none()
+             && usb_link()? != UsbLink::Connected;
++        if may_sleep != could_sleep {
++            note(if may_sleep { "the phone may sleep now" } else { "the phone has to stay awake" })?;
++            could_sleep = may_sleep;
++        }
+         sleeper.allow(may_sleep);
+         let mut fds = vec![inputs.fd(), uevents.fd(), sleeper.fd()];
+         if let Some(i) = &installer {
+@@ -1585,7 +1711,7 @@
+         let now = monotonic_ms();
+         for slept in sleeper.slept() {
+             match slept {
+-                Slept::Woke => skyward_sys::kmsg("the phone slept and woke")?,
++                Slept::Woke => note("the phone slept and woke")?,
+                 Slept::Refused(why) => skyward_sys::kmsg(&format!("the phone did not sleep: {why}"))?,
+             }
+         }
+@@ -1913,9 +2039,81 @@
+                 app.set_traffic(t);
+             }
+         }
++        // The WLAN kept is opened once the phone's own parts are up, and
++        // joined as soon as its network shows.
++        if app.state.wlan_auto && !wlan_joined {
++            if let Some(saved) = wlan_saved.clone() {
++                let power = app.state.wlan.as_ref().map(|w| w.power.clone());
++                if crate::prepared() && !wlan_opened && matches!(power, Some(WlanPower::Off | WlanPower::Failed(_))) {
++                    wlan_opened = true;
++                    wlan_worker(&wlan)?.send(wlan::Command::On);
++                    skyward_sys::kmsg("the WLAN is opened for the network kept")?;
++                }
++                let found = app.state.wlan.as_ref().and_then(|w| w.networks.iter().find(|n| n.ssid == saved.ssid)).cloned();
++                if matches!(power, Some(WlanPower::On)) {
++                    if let Some(found) = found {
++                        wlan_joined = true;
++                        wlan_password = Some(saved.password.clone());
++                        skyward_sys::kmsg(&format!("joining the network kept: {}", found.name))?;
++                        wlan_worker(&wlan)?.send(wlan::Command::Join {
++                            ssid: found.ssid,
++                            name: found.name,
++                            security: found.security,
++                            password: saved.password,
++                        });
++                    }
++                }
++            }
++        }
++        // A WLAN that did not come up is tried again a few times: the driver
++        // sometimes needs longer than the first go gives it.
++        if app.state.wlan_auto && !wlan_joined && wlan_retries < 3 {
++            let failed = app.state.wlan.as_ref().is_some_and(|w| matches!(w.power, WlanPower::Failed(_)));
++            if failed && wlan_failed_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(5)) {
++                wlan_retries += 1;
++                wlan_failed_at = Some(Instant::now());
++                wlan_worker(&wlan)?.send(wlan::Command::On);
++                skyward_sys::kmsg("the WLAN is opened again after it did not come up")?;
++            }
++        }
++        // A network joined with a password the recovery has: kept for the
++        // starts that follow, or forgotten where the access point refused it.
++        if app.state.wlan_keep && !wlan_kept {
++            if let Some(joined) = app.state.wlan.as_ref().and_then(|w| w.joined.as_ref()) {
++                match &joined.stage {
++                    Joining::Connected(_) => {
++                        if let Some(password) = &wlan_password {
++                            match wlanmem::save(&joined.ssid, password) {
++                                Ok(()) => {
++                                    wlan_kept = true;
++                                    skyward_sys::kmsg(&format!("the network {} is kept for the starts that follow", joined.name))?;
++                                }
++                                Err(e) => skyward_sys::kmsg(&format!("the network was not kept: {e:#}"))?,
++                            }
++                        }
++                    }
++                    Joining::WrongPassword => {
++                        wlan_kept = true;
++                        wlan_saved = None;
++                        wlan_password = None;
++                        let _ = wlanmem::forget_network();
++                        skyward_sys::kmsg("the password kept was refused; the WLAN stays on and the network is forgotten")?;
++                    }
++                    _ => {}
++                }
++            }
++        }
++        let wlan_on = app.state.wlan.as_ref().is_some_and(|w| w.power == WlanPower::On);
++        // The scan the driver answers with right after it comes up often holds
++        // nothing; the network kept is looked for more often than the page
++        // looks for its own, so that joining it does not wait for the
++        // supplicant's own slow round.
++        if app.state.wlan_auto && !wlan_joined && wlan_on && scanned_at.elapsed() >= LOOKING_FOR {
++            scanned_at = Instant::now();
++            wlan_worker(&wlan)?.send(wlan::Command::Scan);
++        }
+         // The WLAN page scans again now and then while it shows, as the
+         // stock settings do.
+-        let wlan_on = app.state.wlan.as_ref().is_some_and(|w| w.power == WlanPower::On);
+         if app.screen() == Screen::Wlan && wlan_on && scanned_at.elapsed() >= SCAN_EVERY {
+             scanned_at = Instant::now();
+             wlan_worker(&wlan)?.send(wlan::Command::Scan);
+@@ -2028,6 +2226,14 @@
+         }
+         if let Some(ended) = decryptor.as_ref().and_then(Decryptor::ended) {
+             decryptor = None;
++            note(match &ended {
++                decrypt::Ended::Opened(Ok(_)) => "the opening ended; the data partition is open",
++                decrypt::Ended::Opened(Err(_)) => "the opening ended, and the data partition did not open",
++                decrypt::Ended::Unlocked(Ok(_)) => "the opening of a user's files ended",
++                decrypt::Ended::Unlocked(Err(_)) => "the opening of a user's files ended, and they did not open",
++            })?;
++            // The bar on the page reached its end as the opening did.
++            app.set_data_progress(1.0);
+             match ended {
+                 decrypt::Ended::Opened(Ok(opening)) => {
+                     if let Some(mounted) = &opening.mounted {
+@@ -2035,6 +2241,20 @@
+                     }
+                     closed = opening.closed;
+                     show_closed(&mut app, &closed)?;
++                    // The screen lock kept from before opens the user's own
++                    // files without anyone typing it. A wrong one is not tried
++                    // again: the secure world counts it against the user.
++                    if !tried_remembered && !closed.is_empty() {
++                        tried_remembered = true;
++                        if let (Some(credential), Some(first)) = (remembered.clone(), closed.first()) {
++                            let user = first.user;
++                            skyward_sys::kmsg(&format!("opening user {user}'s files with the screen lock kept from before"))?;
++                            last_credential = Some(credential.clone());
++                            attempt_was_remembered = true;
++                            let job = decrypt::Job::Unlock { closed: closed.clone(), user, credential };
++                            decryptor = Some(Decryptor::start(job)?);
++                        }
++                    }
+                 }
+                 decrypt::Ended::Opened(Err(why)) => {
+                     skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
+@@ -2051,11 +2271,42 @@
+                     app.data_failed(why);
+                 }
+                 decrypt::Ended::Unlocked(Ok(still)) => {
++                    let opened = still.len() < closed.len();
+                     closed = still;
+                     show_closed(&mut app, &closed)?;
++                    // The page has done its work: the menu is what to show,
++                    // with no page of its own in between. One that failed to
++                    // open the partition stays where it is.
++                    if closed.is_empty() {
++                        app.decrypted();
++                    }
++                    if opened {
++                        match (app.state.remember, last_credential.as_deref()) {
++                            (true, Some(credential)) => match remember::write(credential) {
++                                Ok(()) => {
++                                    remembered = Some(credential.to_vec());
++                                    skyward_sys::kmsg("the screen lock is kept for the starts that follow")?;
++                                }
++                                Err(e) => skyward_sys::kmsg(&format!("the screen lock was not kept: {e:#}"))?,
++                            },
++                            (false, _) => {
++                                remembered = None;
++                                if let Err(e) = remember::forget() {
++                                    skyward_sys::kmsg(&format!("the kept screen lock was not forgotten: {e:#}"))?;
++                                }
++                            }
++                            _ => {}
++                        }
++                    }
+                 }
+                 decrypt::Ended::Unlocked(Err(why)) => {
+                     skyward_sys::kmsg(&format!("what was entered did not open the user's files: {why}"))?;
++                    if attempt_was_remembered {
++                        remembered = None;
++                        app.state.remember = false;
++                        let _ = remember::forget();
++                        skyward_sys::kmsg("the screen lock kept from before did not open the user's files, so it is forgotten")?;
++                    }
+                     app.unlock_failed(why, now);
+                 }
+             }
+@@ -2096,6 +2347,26 @@
+                 shell = None;
+             }
+         }
++        ticks += 1;
++        if app.shade_busy() && shade_logged.elapsed() >= Duration::from_millis(250) {
++            shade_logged = Instant::now();
++            note(&format!("the control centre: now={now} {}", app.shade_spot()))?;
++        }
++        if pending_open.is_some() && crate::prepared() {
++            let job = pending_open.take().expect("checked above");
++            note("the phone's own parts are up; the opening starts now")?;
++            decryptor = Some(Decryptor::start(job)?);
++        }
++        if app.screen() == Screen::Decrypt && decrypt_logged.elapsed() >= Duration::from_millis(500) {
++            decrypt_logged = Instant::now();
++            note(&format!("the decrypt page: now={now} ticks={ticks} {}", app.decrypt_spot()))?;
++            ticks = 0;
++        }
++        // How far opening the data partition has come, which the bar on the
++        // page that waits on it shows.
++        if decryptor.is_some() {
++            app.set_data_progress(skyward_crypto::data::progress());
++        }
+         // Then what programs asked on the recovery socket, each answered as
+         // the recovery stands when its turn comes.
+         let requests = match &control {
+@@ -2116,9 +2387,69 @@
+                     skyward_sys::kmsg(&format!("asked on the recovery socket: {asked:?}"))?;
+                     answer(asked, fastboot)
+                 }
+-                Incoming::Input(Event::Touch(t, at)) => app.touch(t, &fonts, at),
+-                Incoming::Input(Event::Key(k, true)) => app.key(k, now),
++                Incoming::Input(Event::Touch(t, at)) => {
++                    if app.panel_lit() {
++                        // A panel that is lit is worked by touch as usual, and
++                        // no tap is held over from before it lit.
++                        last_tap = None;
++                        app.touch(t, &fonts, at)
++                    } else {
++                        let resting = !surface.is_on();
++                        let what = match t {
++                            Touch::Down(x, y) => format!("down at {x:.0},{y:.0}"),
++                            Touch::Move(x, y) => format!("move at {x:.0},{y:.0}"),
++                            Touch::Up => "up".to_string(),
++                        };
++                        note(&format!(
++                            "a touch came while the display was dark, the panel {}: {what} at {at} ms",
++                            if resting { "at rest" } else { "running" }
++                        ))?;
++                        let second = match (t, last_tap) {
++                            (Touch::Down(x, y), Some((was_x, was_y, was_at))) => {
++                                at.saturating_sub(was_at) <= DOUBLE_TAP_MS
++                                    && (x - was_x).abs() <= DOUBLE_TAP_SLOP
++                                    && (y - was_y).abs() <= DOUBLE_TAP_SLOP
++                            }
++                            _ => false,
++                        };
++                        if let (Touch::Down(x, y), true) = (t, second) {
++                            note(&format!("a double tap at {x:.0},{y:.0} lit the display"))?;
++                            last_tap = None;
++                            let mut fx = app.key(Key::Power, now);
++                            fx.extend(app.key_up(Key::Power, now));
++                            fx
++                        } else {
++                            if let Touch::Down(x, y) = t {
++                                last_tap = Some((x, y, at));
++                            }
++                            // A finger on the dark panel lights nothing.
++                            app.touch(t, &fonts, at)
++                        }
++                    }
++                }
++                Incoming::Input(Event::Key(k, true)) => {
++                    if !app.panel_lit() {
++                        note("a key came while the display was dark")?;
++                    }
++                    app.key(k, now)
++                }
+                 Incoming::Input(Event::Key(k, false)) => app.key_up(k, now),
++                // The touchscreen's double tap, which the panel reports as the
++                // wakeup key. A dark panel is lit the way its power key lights
++                // it — onto the lock — with the release following at once so
++                // the press cannot grow into a hold; a lit panel only keeps
++                // awake, as a touch does.
++                Incoming::Input(Event::Wake) => {
++                    if app.panel_lit() {
++                        note("a double tap came while the display was lit")?;
++                        Vec::new()
++                    } else {
++                        note("a double tap came while the display was dark")?;
++                        let mut fx = app.key(Key::Power, now);
++                        fx.extend(app.key_up(Key::Power, now));
++                        fx
++                    }
++                }
+             };
+             // What the pages ask for in answer to the work done goes on
+             // after it.
+@@ -2294,13 +2625,41 @@
+                     // The decrypt page shows meanwhile that the work is
+                     // under way, and takes nothing more until it is done.
+                     Effect::OpenData => {
+-                        ensure!(decryptor.is_none(), "the data partition is being opened already");
+-                        decryptor = Some(Decryptor::start(decrypt::Job::Open)?);
++                        ensure!(decryptor.is_none() && pending_open.is_none(), "the data partition is being opened already");
++                        note("opening the data partition, as the page asked")?;
++                        // The screen is drawn before the phone's own parts are
++                        // up, and the key service this needs is one of them: the
++                        // waiting is done a turn of the loop at a time, so that
++                        // the page keeps up its ring and its bar meanwhile.
++                        match crate::prepared() {
++                            true => decryptor = Some(Decryptor::start(decrypt::Job::Open)?),
++                            false => {
++                                note("the phone's own parts are not up yet; the opening waits for them")?;
++                                pending_open = Some(decrypt::Job::Open);
++                            }
++                        }
+                     }
+                     Effect::Unlock { user, code } => {
+-                        ensure!(decryptor.is_none(), "the data partition is being opened already");
+-                        let job = decrypt::Job::Unlock { closed: closed.clone(), user, credential: code.into_bytes() };
+-                        decryptor = Some(Decryptor::start(job)?);
++                        ensure!(decryptor.is_none() && pending_open.is_none(), "the data partition is being opened already");
++                        let credential = code.into_bytes();
++                        last_credential = Some(credential.clone());
++                        attempt_was_remembered = false;
++                        let job = decrypt::Job::Unlock { closed: closed.clone(), user, credential };
++                        match crate::prepared() {
++                            true => decryptor = Some(Decryptor::start(job)?),
++                            false => {
++                                note("the phone's own parts are not up yet; the unlock waits for them")?;
++                                pending_open = Some(job);
++                            }
++                        }
++                    }
++                    Effect::Remember(on) => {
++                        if !on {
++                            remembered = None;
++                            if let Err(e) = remember::forget() {
++                                skyward_sys::kmsg(&format!("the kept screen lock was not forgotten: {e:#}"))?;
++                            }
++                        }
+                     }
+                     Effect::ReadDir(folder) => list(&mut app, folder)?,
+                     Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,
+@@ -2465,11 +2824,33 @@
+                         merger = Some(merge::Merger::start(slot, true)?);
+                     }
+                     Effect::Wlan(on) => wlan_worker(&wlan)?.send(if on { wlan::Command::On } else { wlan::Command::Off }),
++                    Effect::WlanAuto(on) => {
++                        wlanmem::set_auto(on)?;
++                        skyward_sys::kmsg(if on {
++                            "the WLAN opens as the recovery starts"
++                        } else {
++                            "the WLAN stays off as the recovery starts"
++                        })?;
++                    }
++                    Effect::WlanKeep(on) => {
++                        wlanmem::set_keep(on)?;
++                        if !on {
++                            wlan_saved = None;
++                        }
++                        skyward_sys::kmsg(if on {
++                            "the WLAN password is kept once a network is joined"
++                        } else {
++                            "the WLAN password kept is forgotten"
++                        })?;
++                    }
+                     Effect::ScanWlan => {
+                         scanned_at = Instant::now();
+                         wlan_worker(&wlan)?.send(wlan::Command::Scan);
+                     }
+                     Effect::JoinWlan { ssid, name, security, password } => {
++                        wlan_joined = true;
++                        wlan_kept = false;
++                        wlan_password = Some(password.0.clone());
+                         wlan_worker(&wlan)?.send(wlan::Command::Join { ssid, name, security, password: password.0 })
+                     }
+                     Effect::LeaveWlan => wlan_worker(&wlan)?.send(wlan::Command::Leave),
+@@ -2502,7 +2883,8 @@
+                     Effect::CheckSkyward => {
+                         ensure!(skyward_checker.is_none(), "GitHub is being asked already");
+                         let probe = cfg.wlan.as_ref().context("the phone's WLAN is not brought up")?.probe.clone();
+-                        let task = updates::Task::CheckSkyward { probe, codename: cfg.device.codename.clone() };
++                        let at = cfg.update.as_ref().and_then(|u| u.skyward.clone()).unwrap_or_else(|| skyward_net::github::LATEST.to_string());
++                        let task = updates::Task::CheckSkyward { probe, codename: cfg.device.codename.clone(), at };
+                         skyward_checker = Some(updates::Worker::start(task, servers.clone())?);
+                     }
+                     // The zip goes into the recovery's own folder, which is
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward/src/updates.rs b/crates/skyward/src/updates.rs
+--- a/crates/skyward/src/updates.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward/src/updates.rs	2026-11-11 02:42:24.256998843 +0000
+@@ -42,7 +42,7 @@
+     /// Ask GitHub for Skyward's newest release and its zip for the phone
+     /// `codename` names; where that fails, `probe` says whether the network
+     /// is why.
+-    CheckSkyward { probe: String, codename: String },
++    CheckSkyward { probe: String, codename: String, at: String },
+     /// Download `build` to `path`, check that its image is Skyward for the
+     /// phone `codename` names, and write the image into the recovery
+     /// partitions of the slot that starts next and of any other slot that
+@@ -148,10 +148,14 @@
+                         let end = fetch(&servers, release.urls.clone(), &sum, &release.name, &path, &stopping, &using, &tell, &mut refused);
+                         tell(Event::Ended(end));
+                     }
+-                    Task::CheckSkyward { probe, codename } => {
++                    Task::CheckSkyward { probe, codename, at } => {
+                         let a = http::agent(servers.clone());
+                         *using.lock().expect("the agent is not held by a thread that panicked") = Some(a.clone());
+-                        let answer = github::ask(&a, &codename, skyward_info::VERSION).map_err(|e| unanswered(&e, github::LATEST, &probe, &servers));
++                        let running = match skyward_info::RELEASE {
++                            "" => skyward_info::VERSION,
++                            release => release,
++                        };
++                        let answer = github::ask(&a, &at, &codename, running).map_err(|e| unanswered(&e, &at, &probe, &servers));
+                         tell(Event::SkywardChecked(answer));
+                     }
+                     // GitHub's API hands the zip out at a short-lived address
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward/src/wlan.rs b/crates/skyward/src/wlan.rs
+--- a/crates/skyward/src/wlan.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward/src/wlan.rs	2026-11-11 01:48:54.992999940 +0000
+@@ -55,8 +55,10 @@
+ /// goes.
+ const TRAFFIC: Duration = Duration::from_secs(1);
+ 
+-/// How long after the network gave no address it is asked again.
+-const RETRY: Duration = Duration::from_secs(10);
++/// How long after the network gave no address it is asked again. A router
++/// that takes back the address it offered is common right after it comes up,
++/// and ten seconds of waiting for a second go costs more than it saves.
++const RETRY: Duration = Duration::from_secs(3);
+ 
+ /// What the screen asks of the WLAN.
+ pub enum Command {
+@@ -665,10 +667,31 @@
+     }
+ }
+ 
++/// Put the driver's firmware and modules in and tell it it may start, without
++/// waiting for the interface. The recovery does this while the services come
++/// up: the driver takes about eleven seconds to make its interface, and that
++/// time is better spent there than after a page has asked for the WLAN.
++pub fn warm_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
++    if iface::exists(&cfg.interface) {
++        return Ok(());
++    }
++    for file in &cfg.firmware {
++        place(file)?;
++    }
++    for path in skyward_modules::load(modules, &cfg.modules)? {
++        skyward_sys::kmsg(&format!("loaded {}", path.display()))?;
++    }
++    for w in &cfg.writes {
++        fs::write(&w.path, &w.value).with_context(|| format!("write {} to {}", w.value, w.path))?;
++    }
++    Ok(())
++}
++
+ /// Load the driver where its interface is not there yet, and bring the
+ /// interface up.
+ fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
+     let net = Path::new("/sys/class/net").join(&cfg.interface);
++    let until = Instant::now() + INTERFACE_WAIT;
+     if !net.exists() {
+         for file in &cfg.firmware {
+             place(file)?;
+@@ -679,13 +702,23 @@
+         for w in &cfg.writes {
+             fs::write(&w.path, &w.value).with_context(|| format!("write {} to {}", w.value, w.path))?;
+         }
+-        let until = Instant::now() + INTERFACE_WAIT;
+         while !net.exists() {
+             ensure!(Instant::now() < until, "the driver made no {} in {} seconds", cfg.interface, INTERFACE_WAIT.as_secs());
+             thread::sleep(Duration::from_millis(100));
+         }
+     }
+-    iface::set_up(&cfg.interface, true)
++    // The name shows in /sys/class/net a moment before the device answers an
++    // ioctl: on 2026-11-11 the driver made wlan0 and then refused
++    // SIOCGIFFLAGS with ENODEV, which failed the whole start.
++    loop {
++        match iface::set_up(&cfg.interface, true) {
++            Ok(()) => return Ok(()),
++            Err(e) => {
++                ensure!(Instant::now() < until, "{e:#}");
++                thread::sleep(Duration::from_millis(200));
++            }
++        }
++    }
+ }
+ 
+ /// Put a file the driver asks for where the firmware loader looks.
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward/src/wlanmem.rs b/crates/skyward/src/wlanmem.rs
+--- a/crates/skyward/src/wlanmem.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/crates/skyward/src/wlanmem.rs	2026-11-11 01:40:17.408999970 +0000
+@@ -0,0 +1,183 @@
++//! The WLAN a user chose to have kept: whether it is opened as the recovery
++//! starts, whether the password of the network joined last is kept, and that
++//! network with its password.
++//!
++//! Kept beside the recovery's own settings, readable by root alone. Turning
++//! the password off takes the network away with it, and so does a factory
++//! reset.
++
++use anyhow::{Context, Result};
++use std::os::unix::fs::PermissionsExt;
++use std::path::Path;
++
++/// The partition the file is on, made writable for as long as a write takes.
++const METADATA: &str = "/metadata";
++
++/// Where it is kept: beside the recovery's own settings.
++pub const FILE: &str = "/metadata/skyward/wlan";
++
++/// A network kept, with the password it was joined with.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Saved {
++    pub ssid: Vec<u8>,
++    pub password: String,
++}
++
++/// What the file holds.
++#[derive(Debug, Clone, Default, PartialEq, Eq)]
++pub struct Kept {
++    /// Open the WLAN as the recovery starts.
++    pub auto: bool,
++    /// Keep the password of the network joined last.
++    pub keep: bool,
++    /// That network, where one is kept.
++    pub saved: Option<Saved>,
++}
++
++/// What is kept, as the file holds it.
++pub fn read() -> Kept {
++    let text = match std::fs::read_to_string(FILE) {
++        Ok(text) => text,
++        Err(_) => return Kept::default(),
++    };
++    let mut kept = Kept::default();
++    let (mut ssid, mut password) = (None, None);
++    for line in text.lines() {
++        let Some((key, value)) = line.split_once('=') else {
++            continue;
++        };
++        match key.trim() {
++            "auto" => kept.auto = value.trim() == "1",
++            "keep" => kept.keep = value.trim() == "1",
++            "ssid" => ssid = unhex(value.trim()),
++            "password" => password = Some(value.to_string()),
++            _ => {}
++        }
++    }
++    if kept.keep {
++        if let (Some(ssid), Some(password)) = (ssid, password) {
++            if !ssid.is_empty() && !password.is_empty() {
++                kept.saved = Some(Saved { ssid, password });
++            }
++        }
++    }
++    kept
++}
++
++/// Do `work` with the partition writable, and read-only again afterwards.
++fn writable<T>(work: impl FnOnce() -> Result<T>) -> Result<T> {
++    let at = Path::new(METADATA);
++    let mounted = skyward_block::mount::is_mount_point(at)?;
++    if mounted {
++        skyward_block::mount::remount_writable(at, true).context("make /metadata writable")?;
++    }
++    let done = work();
++    if mounted {
++        let _ = skyward_block::mount::remount_writable(at, false);
++    }
++    done
++}
++
++fn store(text: &str) -> Result<()> {
++    writable(|| {
++        let at = Path::new(FILE);
++        if let Some(dir) = at.parent() {
++            std::fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
++        }
++        std::fs::write(at, text).with_context(|| format!("write {}", at.display()))?;
++        std::fs::set_permissions(at, std::fs::Permissions::from_mode(0o600))
++            .with_context(|| format!("keep {} to root alone", at.display()))?;
++        Ok(())
++    })
++}
++
++fn render(kept: &Kept) -> String {
++    let mut text = format!("auto={}\nkeep={}\n", u8::from(kept.auto), u8::from(kept.keep));
++    if let Some(saved) = &kept.saved {
++        text.push_str(&format!("ssid={}\npassword={}\n", hex(&saved.ssid), saved.password));
++    }
++    text
++}
++
++/// Set whether the WLAN opens as the recovery starts, leaving the rest as it
++/// was.
++pub fn set_auto(on: bool) -> Result<()> {
++    let mut kept = read();
++    kept.auto = on;
++    store(&render(&kept))
++}
++
++/// Set whether the password is kept. Turning it off takes the network away.
++pub fn set_keep(on: bool) -> Result<()> {
++    let mut kept = read();
++    kept.keep = on;
++    if !on {
++        kept.saved = None;
++    }
++    store(&render(&kept))
++}
++
++/// Keep `ssid` and the password it was joined with.
++pub fn save(ssid: &[u8], password: &str) -> Result<()> {
++    let mut kept = read();
++    kept.keep = true;
++    kept.saved = Some(Saved { ssid: ssid.to_vec(), password: password.to_string() });
++    store(&render(&kept))
++}
++
++/// Keep the settings but forget the network, as after a password the access
++/// point refused.
++pub fn forget_network() -> Result<()> {
++    let mut kept = read();
++    kept.saved = None;
++    store(&render(&kept))
++}
++
++fn hex(bytes: &[u8]) -> String {
++    bytes.iter().map(|b| format!("{b:02x}")).collect()
++}
++
++fn unhex(text: &str) -> Option<Vec<u8>> {
++    if text.len() % 2 != 0 {
++        return None;
++    }
++    (0..text.len())
++        .step_by(2)
++        .map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok())
++        .collect()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn a_name_goes_round_the_file_as_bytes() {
++        assert_eq!(unhex(&hex("Skyward客厅".as_bytes())).as_deref(), Some("Skyward客厅".as_bytes()));
++    }
++
++    #[test]
++    fn a_password_keeps_what_it_holds() {
++        assert_eq!(unhex(&hex(b"pa ss=word")), Some(b"pa ss=word".to_vec()));
++    }
++
++    #[test]
++    fn half_a_byte_is_no_name() {
++        assert_eq!(unhex("abc"), None);
++    }
++
++    #[test]
++    fn what_is_written_is_what_is_read() {
++        let kept = Kept { auto: true, keep: true, saved: Some(Saved { ssid: b"Sarva5".to_vec(), password: "p=w d".into() }) };
++        let text = render(&kept);
++        assert_eq!(text, "auto=1\nkeep=1\nssid=536172766135\npassword=p=w d\n");
++    }
++
++    #[test]
++    fn a_network_kept_without_the_setting_is_not_kept() {
++        let mut kept = Kept { auto: true, keep: false, saved: Some(Saved { ssid: b"x".to_vec(), password: "y".into() }) };
++        assert_eq!(render(&kept), "auto=1\nkeep=0\n");
++        kept.saved = None;
++        assert_eq!(render(&kept), "auto=1\nkeep=0\n");
++    }
++}
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-backup/src/archive.rs b/crates/skyward-backup/src/archive.rs
+--- a/crates/skyward-backup/src/archive.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-backup/src/archive.rs	2026-11-11 06:37:42.965999932 +0000
+@@ -99,13 +99,20 @@
+ /// `skipped`, sockets, which only the program that made them answers, and
+ /// what another filesystem mounted inside holds. A folder comes before what
+ /// it holds. Tells how many bytes of file contents are archived so far.
+-pub fn pack(root: &Path, skipped: &Skipped, out: impl Write, cancel: &AtomicBool, progress: &mut dyn FnMut(u64)) -> Result<()> {
++pub fn pack(root: &Path, skipped: &Skipped, out: impl Write, cancel: &AtomicBool, progress: &mut dyn FnMut(u64)) -> Result<usize> {
+     let mut b = Builder::new(out);
+     let meta = fs::symlink_metadata(root).with_context(|| format!("look at {}", root.display()))?;
+-    let mut packing = Packing { links: HashMap::new(), done: 0, cancel, progress };
++    let mut packing = Packing { links: HashMap::new(), done: 0, cancel, progress, locked: 0 };
+     packing.folder(&mut b, root, Path::new(""), meta.dev(), skipped, key(root)?.as_deref())?;
+     b.into_inner().context("finish the archive")?.flush().context("finish the archive")?;
+-    Ok(())
++    Ok(packing.locked)
++}
++
++/// Whether `e` is a file this recovery cannot read now rather than one that
++/// is broken: a key it does not hold, as the second space's files keep theirs
++/// behind the owner's credential, or a permission the running system set.
++fn locked(e: &io::Error) -> bool {
++    matches!(e.raw_os_error(), Some(1) | Some(13) | Some(126))
+ }
+ 
+ struct Packing<'a> {
+@@ -115,6 +122,9 @@
+     done: u64,
+     cancel: &'a AtomicBool,
+     progress: &'a mut dyn FnMut(u64),
++    /// Files left out because this recovery cannot read them, such as those
++    /// whose key the second space keeps behind the owner's credential.
++    locked: usize,
+ }
+ 
+ impl Packing<'_> {
+@@ -177,7 +187,16 @@
+             }
+             header.set_entry_type(EntryType::Regular);
+             header.set_size(meta.len());
+-            let file = File::open(path)?;
++            let file = match File::open(path) {
++                Ok(file) => file,
++                Err(e) if locked(&e) => {
++                    // Counted and left out: a file whose key is not here now
++                    // is no reason to lose the rest of the backup.
++                    self.locked += 1;
++                    return Ok(());
++                }
++                Err(e) => return Err(e).with_context(|| format!("open {}", path.display())),
++            };
+             let feed = Feed { file, left: meta.len(), done: &mut self.done, cancel: self.cancel, progress: &mut *self.progress };
+             b.append_data(&mut header, rel, feed)?;
+         } else {
+@@ -562,7 +581,15 @@
+ #[cfg(target_os = "android")]
+ fn fs_attributes(path: &Path) -> Result<FsXattr> {
+     use std::os::fd::AsRawFd;
+-    let file = open_bare(path)?;
++    // The second space keeps its files behind the owner's credential, and
++    // this recovery leaves them closed: asking the kernel about one answers
++    // ENOKEY, and the file is left out of the archive rather than the whole
++    // backup failing.
++    let file = match open_bare(path) {
++        Ok(file) => file,
++        Err(e) if e.downcast_ref::<io::Error>().is_some_and(locked) => return Ok(FsXattr::default()),
++        Err(e) => return Err(e),
++    };
+     let mut fsx = FsXattr::default();
+     if unsafe { libc::ioctl(file.as_raw_fd(), FS_IOC_FSGETXATTR, &mut fsx) } != 0 {
+         let e = io::Error::last_os_error();
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-config/src/lib.rs b/crates/skyward-config/src/lib.rs
+--- a/crates/skyward-config/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-config/src/lib.rs	2026-11-11 02:35:25.908999002 +0000
+@@ -169,6 +169,11 @@
+ pub struct Update {
+     /// Where the questions are sent.
+     pub server: String,
++    /// Where Skyward's newest build is told of, where this build names one:
++    /// a release's JSON as GitHub answers with, possibly through a mirror.
++    /// Without it, the upstream project's own newest release is asked for.
++    #[serde(default)]
++    pub skyward: Option<String>,
+ }
+ 
+ /// What a backup takes in and leaves out beyond what every Android phone
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-crypto/src/data.rs b/crates/skyward-crypto/src/data.rs
+--- a/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-crypto/src/data.rs	2026-11-11 08:25:16.503999858 +0000
+@@ -18,6 +18,30 @@
+ use skyward_block::{dm, mount};
+ use std::path::{Path, PathBuf};
+ 
++use std::sync::atomic::{AtomicU8, Ordering};
++
++/// How far the opening has come, for the page that waits on it: the number of
++/// the steps below it has taken so far, the last of which is set as it returns.
++static STEP: AtomicU8 = AtomicU8::new(0);
++
++/// The steps an opening goes through, in order: the partition, the files that
++/// are no one user's, then each user's own.
++const STEPS: u8 = 5;
++
++/// Zero the steps for a job about to start.
++pub fn restart() {
++    STEP.store(0, Ordering::Relaxed);
++}
++
++/// How far the opening has come, from 0 to 1, 1 being its end.
++pub fn progress() -> f32 {
++    f32::from(STEP.load(Ordering::Relaxed)) / f32::from(STEPS)
++}
++
++fn at(step: u8) {
++    STEP.store(step, Ordering::Relaxed);
++}
++
+ /// Where the data partition is mounted, and the name its decrypted form is
+ /// given among the device-mapper's devices.
+ pub const MOUNT: &str = "/data";
+@@ -32,6 +56,12 @@
+ /// The phone's owner, the first of its users.
+ const OWNER: u32 = 0;
+ 
++/// The second space HyperOS keeps: a user of its own, whose files are kept
++/// behind the owner's credential. Opening them is a second unlock, behind the
++/// one the page asked for, and one that can leave the page waiting; the
++/// recovery leaves them closed.
++const SECOND_SPACE: u32 = 999;
++
+ /// The key is in a directory of this name under the one the phone names.
+ const KEY_DIR: &str = "key";
+ 
+@@ -205,14 +235,20 @@
+ /// sign in, and open the own files of every user who set no screen lock
+ /// and, behind the owner's, of those whose credential the phone made up.
+ pub fn open_without_credential(service: &KeyMint) -> Result<Opening> {
++    at(1);
+     let mounted = match mount::is_mount_point(Path::new(MOUNT))? {
+         true => None,
+         false => Some(open(service)?),
+     };
++    at(2);
+     open_shared(service)?;
++    at(3);
+     let mut closed = Vec::new();
+     let mut owner = Note::default();
+     for user in open_users(service)? {
++        if user == SECOND_SPACE {
++            continue;
++        }
+         let protector = protector(user)?;
+         match protector.lock {
+             None => {
+@@ -224,19 +260,26 @@
+             Some(lock) => closed.push(Closed { user, lock: lock.kind, made_up: made_up(user, &protector.id), why: None }),
+         }
+     }
+-    Ok(Opening { mounted, closed: open_made_up(service, closed, &owner) })
++    at(4);
++    let closed = open_made_up(service, closed, &owner);
++    at(5);
++    Ok(Opening { mounted, closed })
+ }
+ 
+ /// Open the own files of `user` with what they typed at their screen lock
+ /// and, where `user` is the owner, of each of `closed` whose credential
+ /// the phone made up behind theirs; give those still closed.
+ pub fn unlock(service: &KeyMint, closed: &[Closed], user: u32, credential: &[u8]) -> Result<Vec<Closed>> {
++    at(1);
+     let note = open_user_files(service, user, Some(credential), None)?;
++    at(3);
+     let rest = closed.iter().filter(|c| c.user != user).cloned().collect();
+-    Ok(match user == OWNER {
++    let left = match user == OWNER {
+         true => open_made_up(service, rest, &note),
+         false => rest,
+-    })
++    };
++    at(5);
++    Ok(left)
+ }
+ 
+ /// Open the own files of each of `closed` whose credential the phone made
+@@ -364,6 +407,32 @@
+             ),
+         },
+     };
++    let first = protector_at(&dir, &id)?;
++    // The weaver of a phone that has one lives in its secure element, reached
++    // through the phone's own OMAPI service; a recovery runs none of Android's
++    // framework, so the blob the lock settings name cannot be opened there even
++    // where the weaver's service answers. Android keeps a second blob for the
++    // same user bound to the bytes beside it, which the credential service
++    // alone opens: that one is taken instead, and opens the same secret with
++    // the same credential.
++    if matches!(first.bound, Bound::Weaver(_)) {
++        let other = ids.iter().find(|other| {
++            other.as_str() != id.as_str()
++                && dir.join(format!("{other}.secdis")).is_file()
++                && dir.join(format!("{other}.pwd")).is_file()
++        });
++        if let Some(other) = other {
++            let alt = protector_at(&dir, other.as_str())?;
++            if matches!(alt.bound, Bound::Secdiscardable(_)) {
++                return Ok(alt);
++            }
++        }
++    }
++    Ok(first)
++}
++
++/// What the blob `id` in `dir` keeps a user's secret behind, read as it lies.
++fn protector_at(dir: &Path, id: &str) -> Result<crate::user::Protector> {
+     // A user who has set a screen lock has what the phone recorded about
+     // it beside the blob; a user who has set none has nothing there.
+     let recorded = dir.join(format!("{id}.pwd"));
+@@ -385,7 +454,7 @@
+     Ok(crate::user::Protector {
+         blob: std::fs::read(dir.join(format!("{id}.spblob"))).with_context(|| format!("read the blob in {}", dir.display()))?,
+         bound,
+-        id,
++        id: id.to_string(),
+         lock,
+     })
+ }
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-info/src/lib.rs b/crates/skyward-info/src/lib.rs
+--- a/crates/skyward-info/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-info/src/lib.rs	2026-11-11 02:42:24.256998843 +0000
+@@ -13,6 +13,14 @@
+ /// Version of this build, shown on the About page.
+ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+ 
++/// The release this build was made for, where the build named one: the tag of
++/// the release it is meant to be, so that asking for the newest build knows
++/// whether this one is already it. A build that names none asks by `VERSION`.
++pub const RELEASE: &str = match option_env!("SKYWARD_RELEASE") {
++    Some(tag) => tag,
++    None => "",
++};
++
+ const CPU: &str = "/sys/devices/system/cpu";
+ const POWER_SUPPLY: &str = "/sys/class/power_supply";
+ const SYS_BLOCK: &str = "/sys/class/block";
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-modules/src/lib.rs b/crates/skyward-modules/src/lib.rs
+--- a/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-modules/src/lib.rs	2026-11-11 01:54:42.552999934 +0000
+@@ -25,6 +25,12 @@
+ /// loaded. Returns the files loaded, dependencies first.
+ pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
+     let mut loaded = Vec::new();
++    // A module two of the requested ones lean on is in the order of both, and
++    // handing it to the kernel twice says nothing the first time did not: each
++    // file is loaded once, whatever asked for it -- and whatever call asked
++    // for it, since the WLAN's driver is loaded ahead of the page that wants
++    // it and again when the page does.
++    let mut done = already_loaded();
+     for name in names {
+         let file = format!("{name}.ko");
+         let dir = dirs
+@@ -36,13 +42,39 @@
+             let path = graph
+                 .resolve_path(&m)
+                 .ok_or_else(|| anyhow!("{m} is listed in {}/modules.dep but missing", dir.display()))?;
++            if !done.insert(path.clone()) {
++                continue;
++            }
+             insmod(&path, "")?;
+             loaded.push(path);
+         }
+     }
++    note_loaded(&loaded);
+     Ok(loaded)
+ }
+ 
++/// The module files handed to the kernel so far, so that one asked for twice
++/// -- once by the driver being warmed up, once by the page that wants it -- is
++/// not loaded twice.
++static LOADED: std::sync::OnceLock<std::sync::Mutex<BTreeSet<PathBuf>>> = std::sync::OnceLock::new();
++
++fn loaded_so_far() -> &'static std::sync::Mutex<BTreeSet<PathBuf>> {
++    LOADED.get_or_init(|| std::sync::Mutex::new(BTreeSet::new()))
++}
++
++/// The files already loaded, as the call that is about to load more sees them.
++fn already_loaded() -> BTreeSet<PathBuf> {
++    loaded_so_far().lock().unwrap_or_else(|e| e.into_inner()).clone()
++}
++
++/// Note the files loaded, so that a later call leaves them alone.
++fn note_loaded(paths: &[PathBuf]) {
++    let mut held = loaded_so_far().lock().unwrap_or_else(|e| e.into_inner());
++    for path in paths {
++        held.insert(path.clone());
++    }
++}
++
+ /// A `modules.dep` graph: each module file mapped to the module files it
+ /// depends on. Keys and values are reduced to bare file names so the graph is
+ /// independent of where the modules were sourced from (GKI devices keep them
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-net/src/github.rs b/crates/skyward-net/src/github.rs
+--- a/crates/skyward-net/src/github.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-net/src/github.rs	2026-11-11 05:12:58.564999963 +0000
+@@ -76,8 +76,8 @@
+     let release: Release = serde_json::from_str(answer).context("read GitHub's answer")?;
+     let tag = release.tag_name;
+     let version = tag.strip_prefix('v').with_context(|| format!("the newest release is tagged {tag}, which is not v and a version"))?;
+-    let newest = semver::Version::parse(version).with_context(|| format!("the newest release is tagged {tag}"))?;
+-    let this = semver::Version::parse(running).with_context(|| format!("this build's version is {running}"))?;
++    let newest = numbered(version).with_context(|| format!("the newest release is tagged {tag}"))?;
++    let this = numbered(running).with_context(|| format!("this build's version is {running}"))?;
+     // Each zip is named skyward-, the tag, the phone's codename, and the
+     // stock build the image is made on.
+     let start = format!("skyward-{tag}-{codename}-");
+@@ -92,18 +92,32 @@
+     Ok(Newest { version: version.to_string(), newer: newest > this, build })
+ }
+ 
++/// A version as semver reads it. A release may be numbered by a bare count,
++/// as this project's own are ("v26"): semver wants three parts, and one that
++/// comes without them is read with the rest zero.
++fn numbered(text: &str) -> Result<semver::Version> {
++    let padded;
++    let text = if text.contains('.') {
++        text
++    } else {
++        padded = format!("{text}.0.0");
++        &padded
++    };
++    semver::Version::parse(text).with_context(|| format!("read {text} as a version"))
++}
++
+ /// Ask GitHub for Skyward's newest release, and its zip for the phone
+ /// `codename` names, as the build of version `running`.
+-pub fn ask(agent: &ureq::Agent, codename: &str, running: &str) -> Result<Newest> {
++pub fn ask(agent: &ureq::Agent, at: &str, codename: &str, running: &str) -> Result<Newest> {
+     let mut response = agent
+-        .get(LATEST)
++        .get(at)
+         .header("Accept", "application/vnd.github+json")
+         .header("X-GitHub-Api-Version", API_VERSION)
+         .header("User-Agent", format!("Skyward/{running}"))
+         .call()
+-        .with_context(|| format!("ask {LATEST}"))?;
++        .with_context(|| format!("ask {at}"))?;
+     let status = response.status();
+-    let body = response.body_mut().read_to_string().with_context(|| format!("read the answer of {LATEST}"))?;
++    let body = response.body_mut().read_to_string().with_context(|| format!("read the answer of {at}"))?;
+     if !status.is_success() {
+         bail!(refusal(status, &body));
+     }
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-net/src/iface.rs b/crates/skyward-net/src/iface.rs
+--- a/crates/skyward-net/src/iface.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-net/src/iface.rs	2026-11-11 01:33:35.460999970 +0000
+@@ -76,6 +76,13 @@
+     Ok(mac)
+ }
+ 
++/// Whether the kernel has the interface yet: a driver makes it some seconds
++/// after its module is in, and the supplicant and its address are no use
++/// before then.
++pub fn exists(interface: &str) -> bool {
++    std::path::Path::new("/sys/class/net").join(interface).exists()
++}
++
+ /// Bring the interface up, or take it down.
+ pub fn set_up(interface: &str, up: bool) -> Result<()> {
+     let fd = socket()?;
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-ui/src/app.rs b/crates/skyward-ui/src/app.rs
+--- a/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-ui/src/app.rs	2026-11-11 11:16:56.946999934 +0000
+@@ -9,6 +9,7 @@
+ use crate::font::Fonts;
+ use crate::geom::Rect;
+ use crate::glow::{self, GlowClock};
++use crate::icons::{self, Icon};
+ use crate::lang::{Lang, Text};
+ use crate::motion::{self, Spring};
+ use crate::pages::{self, Band, Ctx};
+@@ -255,6 +256,20 @@
+ 
+ /// What work on internal storage is told before the data partition is
+ /// decrypted.
++/// Where the bar on the decrypt page has come to while the phone's own parts
++/// are still coming up, before the opening itself starts: it runs toward this
++/// from the first frame the page is shown, and the opening takes it on from
++/// there.
++const PREPARE_STEP: f32 = 0.15;
++
++/// How long the ring about the sign on the decrypt page takes to turn once.
++const RING_MS: u64 = 1500;
++
++/// How fast the bar on the decrypt page runs: a share of its length each
++/// millisecond, so that it goes at one speed from its start to its end rather
++/// than easing as it comes near the stage the work has reached.
++const DATA_RATE: f32 = 0.00017;
++
+ pub const DECRYPT_FIRST: Text = ["请先完成「解密」", "請先完成「解密」", "Decrypt first"];
+ 
+ /// What going back is told while work that can be stopped goes on.
+@@ -541,6 +556,30 @@
+     Vibration,
+ }
+ 
++/// How far the control centre has to be pulled, in dp, to be open, and how
++/// long its spring takes to settle: the same numbers as the debug branch of
++/// PXIAOHE's fork, which the sheet is taken from.
++const SHADE_PULL_DP: f32 = 110.0;
++const SHADE_PERIOD: f32 = 1.8;
++const SHADE_KEEPS: f32 = 0.36;
++/// How tall the control centre's sheet is, in dp, at full pull.
++const SHADE_HEIGHT_DP: f32 = 508.0;
++
++/// How long after the control centre is shut the screenshot is taken, so that
++/// what is captured is the page under it and not the sheet itself.
++const SHOT_AFTER_MS: u64 = 130;
++
++/// What a finger can press in the control centre.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++enum ShadeHit {
++    Wlan,
++    Screenshot,
++    Reboot,
++    Sleep,
++    Brightness,
++    Vibration,
++}
++
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub enum Switch {
+     Vibrate,
+@@ -557,6 +596,10 @@
+     /// over.
+     KeepRecovery,
+     Wlan,
++    /// Open the WLAN as the recovery starts and join the network kept.
++    WlanAuto,
++    /// Keep the password of the network joined last.
++    WlanKeep,
+     /// Show the password typed rather than a dot for each character.
+     ShowPassword,
+ }
+@@ -1169,6 +1212,8 @@
+     Skip,
+     /// Try opening the data partition again, after it did not open.
+     OpenData,
++    /// Keep the screen lock, or stop keeping it.
++    Remember,
+     Back,
+     Theme { dark: bool },
+     Toggle(Switch),
+@@ -1670,7 +1715,27 @@
+     /// Where the data partition stands, and what is typed at the screen
+     /// lock its users' own files wait on.
+     pub data: Data,
++    /// How far opening the data partition has come, 0 to 1, as the thread
++    /// doing it reports it: the bar on the decrypt page runs to 1 as the
++    /// opening ends, never before.
++    pub data_progress: f32,
++    /// The turning ring's place in its turn, 0 to 1, while the data partition
++    /// is being opened: a page that is waiting then has something moving on it.
++    pub data_phase: f32,
+     pub code: String,
++    /// Whether the screen lock is kept, so that the data partition opens as
++    /// the recovery starts next time.
++    pub remember: bool,
++    /// Whether the phone's own partitions and services are up. Until they
++    /// are, the data page says it waits for them.
++    pub prepared: bool,
++    /// The day, as the lock shows it above the time.
++    pub date: String,
++    /// Whether the WLAN is opened as the recovery starts, joining the network
++    /// whose password is kept beside the recovery's own settings.
++    pub wlan_auto: bool,
++    /// Whether that password is kept at all.
++    pub wlan_keep: bool,
+     /// What is typed in the search field.
+     pub search: String,
+     /// The on-screen keyboard's layer.
+@@ -1798,7 +1863,14 @@
+             systems_work: None,
+             system_notice: None,
+             data: Data::Closed,
++            data_progress: 0.0,
++            data_phase: 0.0,
+             code: String::new(),
++            remember: false,
++            prepared: false,
++            date: String::new(),
++            wlan_auto: false,
++            wlan_keep: false,
+             search: String::new(),
+             layer: Layer::Letters,
+             held: None,
+@@ -2011,6 +2083,8 @@
+     /// knows, telling what waits with [`App::data_waiting`] or why it did
+     /// not open with [`App::data_failed`].
+     OpenData,
++    /// Keep the screen lock, or stop keeping it.
++    Remember(bool),
+     /// Open the own files of `user` with what they entered at their screen
+     /// lock, telling what still waits with [`App::data_waiting`] or why it
+     /// did not open with [`App::unlock_failed`].
+@@ -2103,6 +2177,10 @@
+     /// Turn the WLAN on or off; how it stands comes back with
+     /// [`App::set_wlan`].
+     Wlan(bool),
++    /// Open the WLAN as the recovery starts, or stop doing so.
++    WlanAuto(bool),
++    /// Keep the password of the network joined last, or forget it.
++    WlanKeep(bool),
+     ScanWlan,
+     JoinWlan { ssid: Vec<u8>, name: String, security: Security, password: Secret },
+     LeaveWlan,
+@@ -2142,6 +2220,8 @@
+     /// threshold, lifting goes back.
+     Edge { start: f32, from_left: bool, armed: bool, x: f32, cy: f32 },
+     Slider(Slider, Rect),
++    /// Pulling the control centre down from the top edge, or letting it go.
++    Shade { start: f32, from: f32 },
+     Confirm { which: Confirm, track: Rect, grab: f32 },
+     /// Scrolling a terminal's screen back through what the shell wrote, or
+     /// the editor's text, `carry` being the part of a row not yet scrolled.
+@@ -2587,6 +2667,21 @@
+     (strip, top)
+ }
+ 
++/// What a locked screen holds: when the panel went dark, and how far the knob
++/// has been slid along.
++struct Lock {
++    since: u64,
++    drag: f32,
++    /// Whether the finger went down on the knob rather than elsewhere.
++    held: bool,
++}
++
++/// How much of the track the knob must reach for the lock to give way.
++const UNLOCK_AT: f32 = 0.96;
++
++/// How long the power key is held on the lock for the reboot page to open.
++const POWER_HOLD_MS: u64 = 1200;
++
+ pub struct App {
+     pub state: State,
+     /// The pages open, the one shown last: each with how far it is
+@@ -2676,6 +2771,12 @@
+     /// When the panel last lit from dark, for the brief guard that keeps a
+     /// stray touch or key from acting on a page just put up.
+     woke_at: Option<u64>,
++    /// The lock the page sits behind once the panel went dark: a clock and a
++    /// knob to slide, so that a touch meant for nothing does not work the
++    /// pages.
++    lock: Option<Lock>,
++    /// When the power key went down on the lock, to tell a press from a hold.
++    lock_press: Option<u64>,
+     /// The panel at full brightness, or easing to the dim level it takes
+     /// shortly before going off.
+     bright: Fade,
+@@ -2725,6 +2826,29 @@
+     /// How round the screen's corners are, in pixels.
+     corners: f32,
+     dirty: bool,
++    /// How far the control centre is pulled over the page, 0 shut to 1 open.
++    shade: f32,
++    /// Where it is going after a hand let it go, as a spring: when it began,
++    /// how far from where it is headed, how fast it was going, its period,
++    /// and where it is headed, all in dp of travel.
++    shade_settle: Option<(u64, f32, f32, f32, f32)>,
++    /// Where the finger last was and how fast it went, for the spring.
++    shade_last: Option<(u64, f32)>,
++    shade_speed: f32,
++    /// What a finger pressed there, and where it came down.
++    shade_press: Option<(ShadeHit, f32)>,
++    shade_hits: Vec<(Rect, ShadeHit)>,
++    /// When the screenshot a tile asked for is to be taken: after the sheet has
++    /// been shut and a frame of the page under it has been drawn.
++    shot_when: Option<u64>,
++    /// How far the bar on the decrypt page has to run: the stage the work has
++    /// reached. The bar itself eases toward it a frame at a time, so it moves
++    /// from the first frame instead of jumping when a stage is done.
++    data_target: f32,
++    /// When the decrypt page was first shown, on the clock the pages keep: the
++    /// bar runs from there, a share of its length each millisecond, till the
++    /// opening is done.
++    data_started: Option<u64>,
+     w: u32,
+     h: u32,
+     px_per_dp: f32,
+@@ -2771,6 +2895,8 @@
+             display_on: true,
+             active: None,
+             woke_at: None,
++            lock: None,
++            lock_press: None,
+             bright: full_brightness(),
+             curtain: Fade::shown(BRIGHTEN, DARKEN),
+             darkening: None,
+@@ -2791,6 +2917,15 @@
+             backdrop: None,
+             corners: 0.0,
+             dirty: true,
++            shade: 0.0,
++            shade_settle: None,
++            shade_last: None,
++            shade_speed: 0.0,
++            shade_press: None,
++            shade_hits: Vec::new(),
++            shot_when: None,
++            data_target: 0.0,
++            data_started: None,
+             w,
+             h,
+             px_per_dp,
+@@ -2815,6 +2950,34 @@
+         self.top().0
+     }
+ 
++    /// The day the lock shows, drawn when the panel is lit on it.
++    pub fn set_date(&mut self, date: String) {
++        if self.state.date != date {
++            self.state.date = date;
++            self.dirty = true;
++        }
++    }
++
++    /// Whether the panel is lit: what the pages show, or nothing at all.
++    /// How far opening the data partition has come, 0 to 1: where the bar on
++    /// the decrypt page is headed, which it eases toward rather than jumping to.
++    pub fn set_data_progress(&mut self, progress: f32) {
++        let progress = progress.clamp(0.0, 1.0);
++        if (progress - self.data_target).abs() > f32::EPSILON {
++            self.data_target = progress;
++            // A job starting afresh puts the bar back at its start at once;
++            // a stage reached is run to over the frames that follow.
++            if progress < self.state.data_progress {
++                self.state.data_progress = progress;
++            }
++            self.dirty = true;
++        }
++    }
++
++    pub fn panel_lit(&self) -> bool {
++        self.display_on
++    }
++
+     fn top(&self) -> &(Screen, f32, Focus) {
+         self.stack.last().expect("the page stack always holds a page")
+     }
+@@ -2846,6 +3009,11 @@
+                 || self.morph.is_some()
+                 || self.turn.is_some()
+                 || self.row_press.is_some_and(|p| p.changing(now) || p.gone(now))
++                || (self.screen() == Screen::Decrypt && matches!(self.state.data, Data::Closed | Data::Opening))
++                || (matches!(self.state.data, Data::Closed | Data::Opening)
++                    && crate::progress::stage() < crate::progress::READY)
++                || self.shade_settle.is_some()
++                || self.shot_when.is_some()
+                 || self.glowing());
+         // The content going dark or coming up, and the charging screen's
+         // tide, move a frame at a time while the panel is lit.
+@@ -2907,6 +3075,30 @@
+     /// deadline goes away.
+     pub fn tick(&mut self, now: u64) -> Vec<Effect> {
+         let mut fx = Vec::new();
++        // The decrypt page while the partition is being opened: its ring turns
++        // every frame, and its bar runs toward the stage the work has reached,
++        // a share of what is left each frame. Before the opening has begun the
++        // bar still runs, toward where the opening will start from, so the page
++        // is never shown standing still while it waits.
++        if self.screen() == Screen::Decrypt && matches!(self.state.data, Data::Closed | Data::Opening) {
++            self.state.data_phase = (now % RING_MS) as f32 / RING_MS as f32;
++            // The bar runs at one speed from the moment the page is shown
++            // until the opening is done: it is the clock that moves it, not
++            // the stage the work has reached, so it never stands still
++            // waiting for the work to report. Of all of it, 97 percent is
++            // reached before the end; the end itself puts the last of it in.
++            let started = *self.data_started.get_or_insert(now);
++            // It runs its whole length at one speed and then waits there, full,
++            // until the opening is done: what it says is how long the page has
++            // been at the work, not how much of the work is behind.
++            self.state.data_progress = ((now.saturating_sub(started)) as f32 * DATA_RATE).min(1.0);
++            self.dirty = true;
++        }
++        if !(self.screen() == Screen::Decrypt && matches!(self.state.data, Data::Closed | Data::Opening)) {
++            // Off the page the bar starts over, so that it runs its length the
++            // next time the page is shown rather than jumping to where it was.
++            self.data_started = None;
++        }
+         // The key waiting for its partner in a screenshot, left alone long
+         // enough, does what it does alone.
+         if self.chord.is_some_and(|(_, at)| now >= at + CHORD_MS) {
+@@ -2927,6 +3119,34 @@
+                 fx.extend(self.held_entry(i));
+             }
+         }
++        // A screenshot asked for on the control centre is taken once the sheet
++        // has been shut and a frame of the page under it has gone to the panel,
++        // so that the shot holds the page and not the sheet (2026-11-11).
++        if let Some(at) = self.shot_when {
++            if now >= at && self.shade <= 0.0 {
++                self.shot_when = None;
++                fx.push(Effect::Screenshot { storage: true });
++            } else {
++                self.dirty = true;
++            }
++        }
++        // The control centre, let go, settles into place: it comes to rest in
++        // one move, easing out, rather than swinging about the place it is
++        // headed for. A spring that overshoots was what made the sheet bounce
++        // up and down several times as it was pulled open (2026-11-11).
++        if let Some((at, from, _speed, period, target)) = self.shade_settle {
++            let t = now.saturating_sub(at) as f32 / 1000.0;
++            let k = (t / period).clamp(0.0, 1.0);
++            // Slow to set off and slow to come to rest, as a sheet sliding
++            // under its own weight: smoothstep, not a quick ease-out.
++            let eased = k * k * (3.0 - 2.0 * k);
++            self.shade = ((target + from * (1.0 - eased)) / SHADE_PULL_DP).clamp(0.0, 1.0);
++            if k >= 1.0 {
++                self.shade_settle = None;
++                self.shade = (target / SHADE_PULL_DP).clamp(0.0, 1.0);
++            }
++            self.dirty = true;
++        }
+         let active = *self.active.get_or_insert(now);
+         if let (true, Some(after)) = (self.display_on, SCREEN_OFF[self.state.screen_off]) {
+             let idle = now.saturating_sub(active);
+@@ -3192,6 +3412,7 @@
+         self.darkening = self.panel(now);
+         self.curtain.set(false, now);
+         self.display_on = false;
++        self.lock = Some(Lock { since: now, drag: 0.0, held: false });
+         self.bright = full_brightness();
+         match std::mem::replace(&mut self.drag, Drag::Idle) {
+             Drag::Confirm { .. } => {
+@@ -4223,7 +4444,21 @@
+     /// Draw what the panel shows now: the page, the charging screen over it
+     /// while a cable has just gone in, both as dark as the content stands
+     /// as the panel goes off or comes up.
++    /// Whether the page is one that moves on its own: the decrypt page while
++    /// the data partition is being opened has a ring turning on it and a bar
++    /// running along, every frame.
++    pub fn animating(&self) -> bool {
++        self.screen() == Screen::Decrypt && matches!(self.state.data, Data::Closed | Data::Opening)
++    }
++
+     pub fn compose(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, now: u64) {
++        // The ring and the bar of the decrypt page are drawn over the page
++        // every frame, so the page itself is not laid out again: a laid-out
++        // page is dear, and laying it out each frame kept the loop from
++        // turning often enough for the ring to be seen turning.
++        if self.animating() {
++            self.dirty = true;
++        }
+         let charge = self.charging.as_ref().map_or(0.0, |c| c.shown.level(now));
+         if charge < 1.0 {
+             self.compose_page(out, f, info, clock, now);
+@@ -4231,9 +4466,57 @@
+         if charge > 0.0 {
+             self.compose_charging(out, f, info, charge, now);
+         }
++        if let Some(lock) = &self.lock {
++            let (drag, since) = (lock.drag, lock.since);
++            self.compose_lock(out, f, info, clock, drag, now.saturating_sub(since));
++        }
+         out.dim(self.curtain.level(now));
+     }
+ 
++    /// Where the lock's knob slides: the bar drawn along the foot of it.
++    fn lock_track(&self) -> Rect {
++        let m = &self.theme().m;
++        let inset = m.margin + m.dp(14.0);
++        let (x, w, h) = (inset, m.w as f32 - inset * 2.0, m.dp(56.0));
++        Rect::new(x, m.h as f32 - m.dp(176.0), w, h)
++    }
++
++    /// The lock over the page: the phone's time, and the knob to slide along.
++    fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, drag: f32, _since: u64) {
++        let t = self.theme().clone();
++        let m = &t.m;
++        let (w, h) = (m.w as f32, m.h as f32);
++        out.fill_rect(0.0, 0.0, w, h, Rgba::rgb(6, 6, 8).with_alpha(226));
++        if let Ok(face) = f.face(400.0) {
++            if !self.state.date.is_empty() {
++                let px = m.dp(20.0);
++                let width = out.text_width(&face, &self.state.date, px);
++                let baseline = h * 0.245;
++                out.text(&face, &self.state.date, (w - width) / 2.0, baseline, px, Rgba::rgb(158, 162, 172), None);
++            }
++        }
++        if let Ok(face) = f.face(600.0) {
++            let px = m.dp(64.0);
++            let baseline = h * 0.335;
++            let width = out.text_width(&face, clock, px);
++            out.text(&face, clock, (w - width) / 2.0, baseline, px, Rgba::rgb(236, 238, 242), None);
++        }
++        // The battery, under the time, as a phone's lock screen shows it.
++        if let (Ok(face), Some(b)) = (f.face(400.0), info.battery.as_ref()) {
++            let percent = format!("{}%", b.level);
++            let note = match b.charging() {
++                true => format!("{percent} · {}", tr!(self.state.lang, "充电中", "充電中", "Charging")),
++                false => percent,
++            };
++            let px = m.dp(18.0);
++            let width = out.text_width(&face, &note, px);
++            out.text(&face, &note, (w - width) / 2.0, h * 0.375, px, Rgba::rgb(150, 154, 164), None);
++        }
++        let track = self.lock_track();
++        let label = tr!(self.state.lang, "滑动解锁", "滑動解鎖", "Slide to unlock");
++        widgets::confirm(out, &t, f, track.y, &label, false, drag);
++    }
++
+     /// The charging screen, `level` of the way over the page drawn on `out`.
+     fn compose_charging(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, level: f32, now: u64) {
+         let battery = info.battery.as_ref().expect("a cable went in on a phone whose battery is read");
+@@ -4379,6 +4662,8 @@
+         self.shown = Some(view);
+ 
+         widgets::status_bar(out, &t, f, &self.bar(clock, info), t.pal.status);
++        self.paint_preparing(out, &t);
++        self.paint_shade(out, &t, f, info, clock);
+         if let Some((text, _)) = &self.toast {
+             widgets::toast(out, &t, f, text);
+         }
+@@ -4395,6 +4680,82 @@
+         }
+     }
+ 
++    /// Whether the control centre is up, being pulled, or settling.
++    pub fn shade_busy(&self) -> bool {
++        self.shade > 0.0 || self.shade_settle.is_some() || matches!(self.drag, Drag::Shade { .. })
++    }
++
++    /// Where the control centre stands, for the log.
++    pub fn shade_spot(&self) -> String {
++        format!(
++            "shade={:.3} speed={:.0} settling={} last={} dragging={} press={:?}",
++            self.shade,
++            self.shade_speed,
++            self.shade_settle.is_some(),
++            self.shade_last.is_some(),
++            matches!(self.drag, Drag::Shade { .. }),
++            self.shade_press.map(|(hit, _)| hit)
++        )
++    }
++
++    /// Where the decrypt page stands, for the log: which state the data
++    /// partition is in, how far the bar has come and where the ring is.
++    pub fn decrypt_spot(&self) -> String {
++        let what = match self.state.data {
++            Data::Locked { .. } => "locked",
++            Data::Closed => "closed",
++            Data::Opening => "opening",
++            Data::Open => "open",
++            Data::Failed(_) => "failed",
++            Data::Erased => "erased",
++        };
++        format!(
++            "data={what} prepared={} stage={} shown={:.3} target={:.3} phase={:.3}",
++            self.state.prepared,
++            crate::progress::stage(),
++            self.state.data_progress,
++            self.data_target,
++            self.state.data_phase
++        )
++    }
++
++    /// The ring that turns about the sign while the phone's parts come up,
++    /// and the bar under it that says how far the work has come. Laid over the
++    /// page rather than drawn into it, so that it moves every frame without the
++    /// page being built again each time — the way the debug branch of
++    /// PXIAOHE's fork draws it.
++    fn paint_preparing(&self, out: &mut Canvas, t: &Theme) {
++        if !matches!(self.state.data, Data::Closed | Data::Opening) {
++            return;
++        }
++        let m = t.m;
++        let x = m.w as f32 / 2.0;
++        let cy = m.dp(150.0);
++        let r = m.dp(40.0);
++        let phase = (crate::progress::phase_ms() % 1500) as f32 / 1500.0;
++        let start = -std::f32::consts::FRAC_PI_2 + phase * std::f32::consts::TAU;
++        out.stroke_circle(x, cy, r, m.dp(1.5), t.pal.track);
++        for k in 0..4 {
++            let a = 0.5 + 0.5 * (k as f32 / 4.0);
++            let color = crate::color::mix(t.pal.bg, t.pal.accent, a * 0.55);
++            out.stroke_arc(x, cy, r, start - 0.14 * (4 - k) as f32, 0.15, m.dp(2.5), color);
++        }
++        out.stroke_arc(x, cy, r, start, 0.9, m.dp(2.5), t.pal.accent);
++        // The bar is the clock's: it runs its length at one speed from the
++        // moment the page is shown, whether the phone's own parts are up yet
++        // or the opening has begun, and waits at its end for the opening to
++        // finish. What the boot stages say goes to the log, not to the bar,
++        // for a bar that follows them jumps a fifth at a time.
++        let done = self.state.data_progress;
++        let (w, h) = (m.dp(200.0), m.dp(4.0));
++        let bar = cy + m.dp(124.0);
++        out.fill_round_rect(x - w / 2.0, bar, w, h, h / 2.0, t.pal.track);
++        if done > 0.0 {
++            out.fill_round_rect(x - w / 2.0, bar, w * done, h, h / 2.0, t.pal.accent);
++            out.fill_circle(x - w / 2.0 + w * done, bar + h / 2.0, m.dp(3.5), t.pal.accent);
++        }
++    }
++
+     /// Draw the page shown as `view` has it: all of it but the status bar,
+     /// any message and the back cue, which lie over every page. Rows of its
+     /// long list come into view are drawn with `fresh`; a page drawn again
+@@ -5137,6 +5498,11 @@
+                 return self.arrive_at(s);
+             }
+             Action::OpenData => return self.open_data(),
++            Action::Remember => {
++                self.state.remember = !self.state.remember;
++                self.refresh();
++                return vec![Effect::Remember(self.state.remember)];
++            }
+             Action::Skip => {
+                 self.leave(true);
+                 if self.stack.len() > 1 {
+@@ -5163,6 +5529,21 @@
+                 self.refresh();
+                 return vec![Effect::Wlan(on)];
+             }
++            // Both settings live in the same file: one says whether the WLAN
++            // opens as the recovery starts, the other whether the password is
++            // kept at all.
++            Action::Toggle(Switch::WlanAuto) => {
++                self.state.wlan_auto = !self.state.wlan_auto;
++                let on = self.state.wlan_auto;
++                self.refresh();
++                return vec![Effect::WlanAuto(on)];
++            }
++            Action::Toggle(Switch::WlanKeep) => {
++                self.state.wlan_keep = !self.state.wlan_keep;
++                let on = self.state.wlan_keep;
++                self.refresh();
++                return vec![Effect::WlanKeep(on)];
++            }
+             Action::Toggle(switch) => {
+                 let on = match switch {
+                     Switch::Vibrate => &mut self.state.vibrate,
+@@ -5173,6 +5554,8 @@
+                     Switch::KeepRecovery => &mut self.state.keep_recovery,
+                     Switch::ShowPassword => &mut self.state.show_password,
+                     Switch::Wlan => unreachable!("the WLAN switch is turned above"),
++                    Switch::WlanAuto => unreachable!("the WLAN setting is turned above"),
++                    Switch::WlanKeep => unreachable!("the WLAN setting is turned above"),
+                 };
+                 *on = !*on;
+                 let now_on = *on;
+@@ -5958,12 +6341,318 @@
+         Vec::new()
+     }
+ 
++    /// The glyph on a tile of the control centre, or beside a slider.
++    fn shade_glyph(out: &mut Canvas, t: &Theme, hit: ShadeHit, cx: f32, cy: f32, size: f32, ink: Rgba) {
++        let stroke = (size * 0.075).max(t.m.dp(1.6));
++        match hit {
++            ShadeHit::Wlan => icons::glyph(out, Icon::Wlan, cx, cy, size, ink),
++            ShadeHit::Sleep => icons::glyph(out, Icon::Power, cx, cy, size, ink),
++            ShadeHit::Screenshot => {
++                // A camera: its body, the bump over its viewfinder, its lens.
++                let (w, h) = (size * 0.74, size * 0.54);
++                let top = cy - h / 2.0 + size * 0.04;
++                out.stroke_round_rect(cx - w / 2.0, top, w, h, size * 0.13, stroke, ink);
++                out.fill_round_rect(cx - size * 0.12, top - size * 0.10, size * 0.24, size * 0.11, size * 0.045, ink);
++                out.stroke_circle(cx, top + h / 2.0, size * 0.145, stroke, ink);
++            }
++            ShadeHit::Reboot => icons::glyph(out, Icon::Restore, cx, cy, size, ink),
++            ShadeHit::Brightness => {
++                // A sun: its disc and eight rays.
++                out.fill_circle(cx, cy, size * 0.19, ink);
++                for k in 0..8 {
++                    let a = k as f32 * std::f32::consts::TAU / 8.0;
++                    let (sin, cos) = a.sin_cos();
++                    let (r0, r1) = (size * 0.30, size * 0.45);
++                    out.line(cx + cos * r0, cy + sin * r0, cx + cos * r1, cy + sin * r1, stroke, ink);
++                }
++            }
++            ShadeHit::Vibration => {
++                // Three bars, the middle one longer: a motor tapping.
++                for (i, tall) in [0.36f32, 0.68, 0.36].iter().enumerate() {
++                    let x = cx + (i as f32 - 1.0) * size * 0.24;
++                    out.fill_round_rect(x - size * 0.06, cy - size * tall / 2.0, size * 0.12, size * tall, size * 0.06, ink);
++                }
++            }
++        }
++    }
++
++    /// Set one of the sheet's sliders from where a finger is.
++    fn shade_slider(&mut self, which: Slider, track: Rect, x: f32) {
++        let level = ((x - track.x) / track.w).clamp(0.0, 1.0);
++        match which {
++            Slider::Brightness => self.state.brightness = level.max(MIN_BRIGHTNESS),
++            Slider::Vibration => self.state.vibration = level,
++        }
++        self.dirty = true;
++    }
++
++    /// The control centre, pulled down from the top edge: the time and the
++    /// battery, the toggles a recovery has a use for, and the two sliders.
++    /// Taken from the debug branch of PXIAOHE's fork, whose sheet frosts the
++    /// page under it; this canvas has no frosting, so the sheet is a dark pane.
++    fn paint_shade(&mut self, out: &mut Canvas, t: &Theme, f: &Fonts, info: &DeviceInfo, clock: &str) {
++        self.shade_hits.clear();
++        if self.shade <= 0.0 {
++            return;
++        }
++        let m = t.m;
++        let w = m.w as f32;
++        let l = self.state.lang;
++        let white = Rgba::rgb(255, 255, 255);
++        let tall = m.dp(SHADE_HEIGHT_DP);
++        let sheet = tall * self.shade;
++        let top = sheet - tall;
++        // The sheet itself, its foot rounded off.
++        out.fill_rect(0.0, 0.0, w, sheet - m.dp(30.0), Rgba::rgb(20, 20, 26).with_alpha(238));
++        out.fill_circle(m.dp(30.0), sheet - m.dp(30.0), m.dp(30.0), Rgba::rgb(20, 20, 26).with_alpha(238));
++        out.fill_circle(w - m.dp(30.0), sheet - m.dp(30.0), m.dp(30.0), Rgba::rgb(20, 20, 26).with_alpha(238));
++        out.fill_rect(m.dp(30.0), sheet - m.dp(30.0), w - m.dp(60.0), m.dp(30.0), Rgba::rgb(20, 20, 26).with_alpha(238));
++        // A grabber at the foot of the sheet.
++        out.fill_round_rect(w / 2.0 - m.dp(18.0), sheet - m.dp(13.0), m.dp(36.0), m.dp(5.0), m.dp(2.5), white.with_alpha(80));
++        // The time and what is left in the battery, drawn in from the edges
++        // towards the middle of the sheet and a little further down it.
++        let inset = m.dp(15.0);
++        let down = m.dp(26.0);
++        out.text(&f.heading, clock, m.margin + inset, top + m.dp(66.0) + down, m.dp(44.0), white, None);
++        if let Some((level, _)) = self.bar(clock, info).battery {
++            let said = format!("{level}%");
++            let wide = out.text_width(&f.body, &said, m.row_title_px);
++            out.text(&f.body, &said, w - m.margin - inset - wide, top + m.dp(58.0) + down, m.row_title_px, white.with_alpha(190), None);
++        }
++        // The toggles, as round-cornered panes over the sheet.
++        let on = self.state.wlan.as_ref().is_some_and(|w| w.power == Power::On);
++        let wlan = if on {
++            l.pick(["WLAN · 已开", "WLAN · 已開", "WLAN · on"])
++        } else {
++            l.pick(["WLAN · 已关", "WLAN · 已關", "WLAN · off"])
++        };
++        let tiles: [(ShadeHit, &str, bool); 4] = [
++            (ShadeHit::Wlan, wlan, on),
++            (ShadeHit::Screenshot, l.pick(["截图", "截圖", "Screenshot"]), false),
++            (ShadeHit::Reboot, l.pick(["重启", "重新啟動", "Reboot"]), false),
++            (ShadeHit::Sleep, l.pick(["熄屏", "關閉螢幕", "Screen off"]), false),
++        ];
++        let (gap, th) = (m.dp(14.0), m.dp(98.0));
++        let tw = (w - m.margin * 2.0 - gap) / 2.0;
++        let tiles_top = top + m.dp(128.0);
++        let mut hits = Vec::new();
++        for (i, (hit, label, lit)) in tiles.iter().enumerate() {
++            let (col, row) = (i % 2, i / 2);
++            let x = m.margin + col as f32 * (tw + gap);
++            let y = tiles_top + row as f32 * (th + gap);
++            let rect = Rect::new(x, y, tw, th);
++            let fill = if *lit { t.pal.accent.with_alpha(72) } else { white.with_alpha(20) };
++            out.fill_round_rect(x, y, tw, th, m.dp(26.0), fill);
++            let ink = if *lit { white } else { white.with_alpha(238) };
++            Self::shade_glyph(out, t, *hit, x + m.dp(33.0), y + m.dp(35.0), m.dp(26.0), ink);
++            out.text(&f.body, label, x + m.dp(18.0), y + th - m.dp(21.0), m.row_title_px, ink, None);
++            hits.push((rect, *hit));
++        }
++        // The backlight and the motor, each over a track.
++        let glyph_x = m.margin + m.dp(13.0);
++        let label_x = m.margin + m.dp(36.0);
++        let (track_h, knob) = (m.dp(7.0), m.dp(19.0));
++        let mut row = tiles_top + 2.0 * (th + gap) + m.dp(24.0);
++        for (which, hit, name) in [
++            (Slider::Brightness, ShadeHit::Brightness, l.pick(["亮度", "亮度", "Brightness"])),
++            (Slider::Vibration, ShadeHit::Vibration, l.pick(["振动", "震動", "Vibration"])),
++        ] {
++            let value = match which {
++                Slider::Brightness => self.state.brightness,
++                Slider::Vibration => self.state.vibration,
++            };
++            Self::shade_glyph(out, t, hit, glyph_x, row - m.dp(5.0), m.dp(21.0), white.with_alpha(210));
++            out.text(&f.body, name, label_x, row, m.sub_px, white.with_alpha(210), None);
++            let track = Rect::new(m.margin, row + m.dp(13.0), w - m.margin * 2.0, track_h);
++            out.fill_round_rect(track.x, track.y, track.w, track.h, track.h / 2.0, white.with_alpha(28));
++            let filled = (track.w * value.clamp(0.0, 1.0)).max(track.h);
++            out.fill_round_rect(track.x, track.y, filled, track.h, track.h / 2.0, t.pal.accent);
++            out.fill_circle(track.x + filled - track.h / 2.0, track.y + track.h / 2.0, knob / 2.0, white);
++            hits.push((track, hit));
++            row += m.dp(13.0) + track_h + m.dp(26.0);
++        }
++        self.shade_hits = hits;
++    }
++
++    /// Shut the control centre at once, for a toggle that opens a page.
++    fn close_shade(&mut self) {
++        self.shade = 0.0;
++        self.shade_settle = None;
++        self.shade_last = None;
++        self.shade_speed = 0.0;
++        self.dirty = true;
++    }
++
++    /// A finger on the control centre, or one pulling it down from the top.
++    fn shade_touch(&mut self, ev: Touch, now: u64) -> Vec<Effect> {
++        let t = self.theme();
++        match ev {
++            Touch::Down(x, y) => {
++                // A new finger starts the sheet afresh: nothing of the last
++                // pull's inertia is carried into it.
++                self.shade_settle = None;
++                self.shade_speed = 0.0;
++                self.shade_last = None;
++                if self.shade > 0.0 {
++                    if let Some((rect, hit)) = self.shade_hits.iter().find(|(r, _)| r.contains(x, y)).copied() {
++                        match hit {
++                            ShadeHit::Brightness | ShadeHit::Vibration => {
++                                let which = if hit == ShadeHit::Brightness { Slider::Brightness } else { Slider::Vibration };
++                                self.shade_slider(which, rect, x);
++                                self.drag = Drag::Slider(which, rect);
++                            }
++                            _ => self.shade_press = Some((hit, y)),
++                        }
++                        return Vec::new();
++                    }
++                }
++                self.drag = Drag::Shade { start: y, from: self.shade };
++                Vec::new()
++            }
++            Touch::Move(x, y) => {
++                if let Drag::Slider(which, track) = self.drag {
++                    self.shade_slider(which, track, x);
++                    return Vec::new();
++                }
++                // A finger that came down on a tile and then moved was pulling
++                // the sheet: the tile is not pressed after all.
++                if let Some((_, down)) = self.shade_press {
++                    if (y - down).abs() > t.m.dp(14.0) {
++                        self.shade_press = None;
++                        self.drag = Drag::Shade { start: down, from: self.shade };
++                    }
++                }
++                if let Drag::Shade { start, from } = self.drag {
++                    let pulled = from * SHADE_PULL_DP + (y - start);
++                    // A sheet pulled past its end gives less and less.
++                    let eased = if pulled > 0.0 { pulled * (1.0 - 0.22 * (pulled / SHADE_PULL_DP).min(1.0)) } else { pulled };
++                    self.shade = (eased / SHADE_PULL_DP).clamp(0.0, 1.0);
++                    if let Some((was_at, was_y)) = self.shade_last {
++                        let dt = now.saturating_sub(was_at) as f32 / 1000.0;
++                        if dt > 0.0005 {
++                            self.shade_speed = self.shade_speed * 0.55 + ((y - was_y) / dt) * 0.45;
++                        }
++                    }
++                    self.shade_last = Some((now, y));
++                    self.shade_settle = None;
++                    self.dirty = true;
++                }
++                Vec::new()
++            }
++            Touch::Up => {
++                let mut fx = Vec::new();
++                if let Some((hit, _)) = self.shade_press.take() {
++                    match hit {
++                        ShadeHit::Wlan => {
++                            let on = self.state.wlan.as_ref().is_some_and(|w| w.power == Power::On);
++                            fx.push(Effect::Wlan(!on));
++                        }
++                        ShadeHit::Screenshot => {
++                            // The sheet goes first, and the shot is taken a few
++                            // frames later, once the page under it has been
++                            // drawn: taken at once, the sheet would be in it.
++                            self.close_shade();
++                            self.shot_when = Some(now + SHOT_AFTER_MS);
++                        }
++                        ShadeHit::Reboot => {
++                            self.close_shade();
++                            fx.extend(self.act(Action::Open(Screen::Reboot), now));
++                        }
++                        ShadeHit::Sleep => {
++                            self.close_shade();
++                            self.sleep(now);
++                        }
++                        ShadeHit::Brightness | ShadeHit::Vibration => {}
++                    }
++                    return fx;
++                }
++                if matches!(self.drag, Drag::Slider(..)) {
++                    self.drag = Drag::Idle;
++                }
++                if matches!(self.drag, Drag::Shade { .. }) {
++                    let dragged = self.shade_last.is_some();
++                    self.drag = Drag::Idle;
++                    // Let go, it carries on a little the way it was going, so a
++                    // flick opens it and a slow drag settles where it got to. A
++                    // finger that only came down and went up again carries no
++                    // speed at all, and the sheet goes to whichever side it is
++                    // nearer, rather than setting off from a stray reading.
++                    let heading = match dragged {
++                        true => self.shade + self.shade_speed / 1400.0,
++                        false => self.shade,
++                    };
++                    let target = if heading >= SHADE_KEEPS { SHADE_PULL_DP } else { 0.0 };
++                    // A finger that comes down and up again while the sheet is
++                    // already on its way to this same place does not start it
++                    // over: the sheet keeps gliding, it does not jerk back.
++                    let already = self.shade_settle.is_some_and(|(_, _, _, _, heading)| heading == target);
++                    if !already {
++                        let from = self.shade * SHADE_PULL_DP - target;
++                        let speed = self.shade_speed.clamp(-2600.0, 2600.0);
++                        self.shade_settle = Some((now, from, speed, SHADE_PERIOD, target));
++                    }
++                    self.shade_last = None;
++                    self.shade_speed = 0.0;
++                }
++                fx
++            }
++        }
++    }
++
+     pub fn touch(&mut self, ev: Touch, f: &Fonts, now: u64) -> Vec<Effect> {
+         // A finger on the dark panel lights nothing, as on the phone's own
+         // system, where the power key lights it.
+         if !self.display_on {
+             return Vec::new();
+         }
++        // The control centre takes every finger while it is over the page or
++        // being pulled out, and one that comes down from the top edge starts
++        // that pull; the lock keeps it shut.
++        let pulling = matches!(self.drag, Drag::Shade { .. });
++        if self.lock.is_none()
++            && (self.shade > 0.0 || pulling || matches!(ev, Touch::Down(_, y) if y <= self.theme().m.dp(40.0)))
++        {
++            return self.shade_touch(ev, now);
++        }
++        // While the lock shows, only its knob answers: nothing a touch meant
++        // for nothing does reaches the page behind.
++        if self.lock.is_some() {
++            let track = self.lock_track();
++            self.stir(now);
++            match ev {
++                Touch::Down(x, y) => {
++                    let on_knob = x >= track.x && x <= track.x + track.w && y >= track.y && y <= track.y + track.h;
++                    if let Some(lock) = &mut self.lock {
++                        lock.held = on_knob;
++                    }
++                }
++                Touch::Move(x, _) => {
++                    let span = (track.w - track.h).max(1.0);
++                    if let Some(lock) = &mut self.lock {
++                        if lock.held {
++                            lock.drag = ((x - (track.x + track.h / 2.0)) / span).clamp(0.0, 1.0);
++                            self.dirty = true;
++                        }
++                    }
++                }
++                Touch::Up => {
++                    let unlocked = self.lock.as_ref().is_some_and(|l| l.held && l.drag >= UNLOCK_AT);
++                    if let Some(lock) = &mut self.lock {
++                        lock.held = false;
++                        if !unlocked {
++                            lock.drag = 0.0;
++                        }
++                    }
++                    if unlocked {
++                        self.lock = None;
++                        self.refresh();
++                    } else {
++                        self.dirty = true;
++                    }
++                }
++            }
++            return Vec::new();
++        }
+         // A finger on the charging screen sends it away for the page, and
+         // does nothing else until it lifts.
+         if self.charge_shown() {
+@@ -6090,6 +6779,9 @@
+                 };
+             }
+             Touch::Move(x, y) => match std::mem::replace(&mut self.drag, Drag::Idle) {
++                Drag::Shade { start, from } => {
++                    self.drag = Drag::Shade { start, from };
++                }
+                 Drag::Press { x: x0, y: y0, action, edge: at_edge, at } => {
+                     self.tracker.add(now, y);
+                     let (dx, dy) = (x - x0, y - y0);
+@@ -6274,6 +6966,32 @@
+         self.dirty = true;
+     }
+ 
++    /// The data partition opened: the page that asked for the screen lock has
++    /// done its work, and the menu it came from is what to show. A page that
++    /// failed to open it keeps saying so, and is left alone.
++    pub fn decrypted(&mut self) {
++        if self.screen() != Screen::Decrypt || !matches!(self.state.data, Data::Open) {
++            return;
++        }
++        self.leave(true);
++        if self.stack.len() > 1 {
++            self.stack.pop();
++        } else {
++            *self.top_mut() = (Screen::Home, 0.0, Focus::Unset);
++        }
++        self.settle_page();
++        self.refresh();
++    }
++
++    /// The touch panel came up after the pages had been worked with the keys:
++    /// touches are taken again.
++    pub fn touchscreen_found(&mut self) {
++        if self.keys {
++            self.keys = false;
++            self.dirty = true;
++        }
++    }
++
+     /// A button went down. With the keys working the page, the volume keys
+     /// move the light from control to control and the power key works the
+     /// one lit as it comes back up; otherwise the first volume press lights
+@@ -6282,6 +7000,22 @@
+     /// goes down first waits [`CHORD_MS`] for the other, or until it is let
+     /// go, and then does what it does alone, as pressed when it went down.
+     pub fn key(&mut self, key: Key, now: u64) -> Vec<Effect> {
++        // Locked, the power key lights the panel onto the lock, and puts it
++        // out again from there; no other key works the page behind it.
++        if self.lock.is_some() {
++            if key == Key::Power {
++                if self.display_on {
++                    // Held long enough, the power key opens the way out of
++                    // the recovery; a plain press puts the panel out again.
++                    self.lock_press = Some(now);
++                } else {
++                    self.wake(now);
++                }
++            } else if self.display_on {
++                self.stir(now);
++            }
++            return Vec::new();
++        }
+         // Any button stops a gliding page, and brings a sliding one to rest.
+         self.fling = None;
+         self.end_turn();
+@@ -6392,6 +7126,23 @@
+     /// partner in a screenshot came, the key waiting for it first does what
+     /// it does alone.
+     pub fn key_up(&mut self, key: Key, now: u64) -> Vec<Effect> {
++        // A power key let go on the lock: held, it opens the reboot page, and
++        // a press puts the panel out again.
++        if self.lock.is_some() && key == Key::Power {
++            let held = self.lock_press.take().map_or(0, |at| now.saturating_sub(at));
++            if held >= POWER_HOLD_MS {
++                self.lock = None;
++                self.open(Screen::Reboot);
++                self.refresh();
++                return Vec::new();
++            }
++            // The press that lit the panel leaves the lock showing: only a
++            // second press, once the panel is up, puts it out.
++            if self.display_on && !self.just_woke(now) {
++                self.sleep(now);
++            }
++            return Vec::new();
++        }
+         let mut fx = match self.chord {
+             Some((first, _)) if first == key => self.let_chord_go(now),
+             _ => Vec::new(),
+@@ -9730,6 +10481,19 @@
+     }
+ 
+     #[test]
++    fn the_decrypt_page_moves_from_the_first_frame_it_is_shown() {
++        let mut app = App::new(Screen::Decrypt, W, H, PPD);
++        app.state.data = Data::Closed;
++        assert_eq!(app.deadline(1000), Some(0), "a page that is waiting is drawn again at once");
++        let before = app.state.data_progress;
++        app.tick(1010);
++        assert!(app.state.data_progress > before, "the bar runs from the first frame");
++        let phase = app.state.data_phase;
++        app.tick(1030);
++        assert_ne!(app.state.data_phase, phase, "the ring turns");
++    }
++
++    #[test]
+     fn a_stopped_second_system_says_why_on_its_page_and_from_the_home_card() {
+         let (f, i) = (fonts(), info());
+         let mut app = App::new(Screen::Home, W, H, PPD);
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-ui/src/lib.rs b/crates/skyward-ui/src/lib.rs
+--- a/crates/skyward-ui/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-ui/src/lib.rs	2026-11-11 08:51:20.962786028 +0000
+@@ -14,6 +14,7 @@
+ pub mod lang;
+ pub mod motion;
+ pub mod pages;
++pub mod progress;
+ pub mod search;
+ pub mod settings;
+ pub mod sprite;
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-ui/src/pages.rs b/crates/skyward-ui/src/pages.rs
+--- a/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
++++ b/crates/skyward-ui/src/pages.rs	2026-11-11 09:05:21.257999911 +0000
+@@ -160,6 +160,8 @@
+ const WLAN: Text = ["WLAN", "Wi-Fi", "Wi-Fi"];
+ const DECRYPT: Text = ["解密", "解密", "Decrypt"];
+ const ADVANCED: Text = ["高级", "進階", "Advanced"];
++const WLAN_AUTO: Text = ["WiFi 自动连接", "WiFi 自動連線", "WLAN on at start"];
++const WLAN_KEEP: Text = ["记住 WiFi 密码", "記住 WiFi 密碼", "Keep the password"];
+ const SETTINGS: Text = ["设置", "設定", "Settings"];
+ const REBOOT: Text = ["重启", "重新啟動", "Reboot"];
+ const ABOUT: Text = ["关于本机", "關於手機", "About phone"];
+@@ -286,6 +288,7 @@
+         y = first.bottom + t.m.card_gap;
+     }
+     let tools = widgets::list(&mut c, t, f, y, &[
++        Row::new(l.pick(FILES)).icon(BLUE, Icon::Folder),
+         Row::new(l.pick(["安装", "安裝", "Install"])).icon(GREEN, Icon::Install),
+         Row::new(l.pick(["备份", "備份", "Backup"])).icon(BLUE, Icon::Backup),
+         Row::new(l.pick(["恢复", "還原", "Restore"])).icon(PURPLE, Icon::Restore),
+@@ -293,6 +296,7 @@
+         Row::new(l.pick(DECRYPT)).icon(BLUE, Icon::Lock).trail(Trail::Value(fmt::data(l, &cx.state.data))),
+     ]);
+     out.extend(hits(&tools.rows, &[
++        Action::Open(Screen::Files),
+         Action::Open(Screen::Install),
+         Action::Open(Screen::Backup),
+         Action::Open(Screen::Restore),
+@@ -385,6 +389,25 @@
+         "When on, a computer can manage the files in internal storage, once it is decrypted.",
+     ]);
+     y = widgets::footnote(&mut c, t, f, usb.bottom, note);
++    // The WLAN's own page holds its switch and the two settings that go with
++    // it; this section is the way in, with where the WLAN stands.
++    let mut wifi = Row::new(l.pick(WLAN)).icon(BLUE, Icon::Wlan);
++    let mut wifi_opens = Vec::new();
++    if let Some(w) = &s.wlan {
++        wifi = wifi.trail(Trail::Value(fmt::wlan_value(l, w)));
++        wifi_opens.push(Action::Open(Screen::Wlan));
++    }
++    y = widgets::section(&mut c, t, f, y, "WiFi");
++    let wlan = widgets::list(&mut c, t, f, y, &[wifi]);
++    if !wifi_opens.is_empty() {
++        out.extend(hits(&wlan.rows, &wifi_opens));
++    }
++    let note = l.pick([
++        "开关、自动连接与记住密码都在这一页里。",
++        "開關、自動連線與記住密碼都在這一頁裡。",
++        "Its switch, joining at start and keeping the password are on that page.",
++    ]);
++    y = widgets::footnote(&mut c, t, f, wlan.bottom, note);
+     y = widgets::section(&mut c, t, f, y, l.pick(["调试", "偵錯", "Debugging"]));
+     let debug = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal)]);
+     out.extend(hits(&debug.rows, &[Action::Open(Screen::Terminal)]));
+@@ -687,14 +710,28 @@
+     let (c, l) = (page(cx), cx.state.lang);
+     match &cx.state.data {
+         Data::Locked { user, keys, checking } => code(cx, c, *user, *keys, *checking),
+-        Data::Closed | Data::Opening => data_status(
+-            cx,
+-            c,
+-            Icon::Lock,
+-            l.pick(["解密 data 分区", "解密 data 分割區", "Decrypt the data partition"]),
+-            Some(l.pick(["正在读取锁屏方式", "正在讀取螢幕鎖定方式", "Reading the screen lock"])),
+-            None,
+-        ),
++        Data::Closed | Data::Opening => {
++            // What the page is waiting for is the phone's own partitions and
++            // services until they are up; only then is it the partition that
++            // is being opened, with the lock kept from before where there is
++            // one, and the lock itself otherwise.
++            let note = if !cx.state.prepared {
++                l.pick(["正在准备分区与服务", "正在準備分割區與服務", "Bringing the phone's own parts up"])
++            } else if cx.state.remember {
++                l.pick(["正在用记住的密码解密", "正在用記住的密碼解密", "Decrypting with the screen lock you kept"])
++            } else {
++                l.pick(["正在读取锁屏方式", "正在讀取螢幕鎖定方式", "Reading the screen lock"])
++            };
++            data_status(
++                cx,
++                c,
++                Icon::Lock,
++                l.pick(["解密 data 分区", "解密 data 分割區", "Decrypt the data partition"]),
++                Some(note),
++                None,
++                None,
++            )
++        }
+         Data::Open => data_status(
+             cx,
+             c,
+@@ -702,8 +739,9 @@
+             l.pick(["data 分区已解密", "data 分割區已解密", "The data partition is decrypted"]),
+             Some(l.pick(["你可以在「文件管理」中查看本机文件", "你可以在「檔案管理」中查看本機檔案", "You can see the phone's files in File manager"])),
+             None,
++            None,
+         ),
+-        Data::Failed(why) => data_status(cx, c, Icon::Lock, l.pick(["未能打开 data 分区", "無法開啟 data 分割區", "Couldn't open the data partition"]), None, Some(why)),
++        Data::Failed(why) => data_status(cx, c, Icon::Lock, l.pick(["未能打开 data 分区", "無法開啟 data 分割區", "Couldn't open the data partition"]), None, Some(why), None),
+         Data::Erased => data_status(
+             cx,
+             c,
+@@ -711,23 +749,52 @@
+             l.pick(DATA_ERASED),
+             Some(l.pick(["下次开机时将重新创建", "下次開機時將重新建立", "It's made anew when the phone next starts"])),
+             None,
++            None,
+         ),
+     }
+ }
+ 
+ /// Where the partition stands, under its sign: a line on it, or why it
+ /// did not open and a way to try again; then the way off the page.
+-fn data_status(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&str>, why: Option<&str>) -> Frame {
++fn data_status(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&str>, why: Option<&str>, bar: Option<f32>) -> Frame {
+     let (t, f, l) = (cx.t, cx.f, cx.state.lang);
+     let m = &t.m;
+     let x = m.w as f32 / 2.0;
+     let sign_cy = m.dp(150.0);
+     c.fill_circle(x, sign_cy, m.dp(30.0), t.pal.card);
+     icons::glyph(&mut c, icon, x, sign_cy, m.dp(40.0), t.pal.accent);
++    // A ring about the sign that turns while the partition is being opened, so
++    // a page that is waiting has something moving on it, as the debug branch of
++    // PXIAOHE's fork draws it.
++    if bar.is_some() {
++        let r = m.dp(48.0);
++        let start = -std::f32::consts::FRAC_PI_2 + cx.state.data_phase * std::f32::consts::TAU;
++        c.stroke_circle(x, sign_cy, r, m.dp(1.5), t.pal.card);
++        for k in 0..4 {
++            let a = 0.5 + 0.5 * (k as f32 / 4.0);
++            let color = crate::color::mix(t.pal.bg, t.pal.accent, a * 0.55);
++            c.stroke_arc(x, sign_cy, r, start - 0.14 * (4 - k) as f32, 0.15, m.dp(2.5), color);
++        }
++        c.stroke_arc(x, sign_cy, r, start, 0.9, m.dp(2.5), t.pal.accent);
++    }
+     c.text_center(&f.heading, title, x, sign_cy + m.dp(64.0), m.dp(24.0), t.pal.text);
+     if let Some(note) = note {
+         c.text_center(&f.body, note, x, sign_cy + m.dp(98.0), m.sub_px, t.pal.subtitle);
+     }
++    // How far the work has come: a bar that runs to its end as the opening
++    // ends, so what is on the page and what the phone is doing finish
++    // together.
++    if let Some(bar) = bar {
++        let width = m.dp(240.0);
++        let height = m.dp(8.0);
++        let top = sign_cy + m.dp(126.0);
++        let left = x - width / 2.0;
++        c.fill_round_rect(left, top, width, height, height / 2.0, t.pal.card);
++        if bar > 0.0 {
++            let run = (width * bar.clamp(0.0, 1.0)).max(height);
++            c.fill_round_rect(left, top, run, height, height / 2.0, t.pal.accent);
++        }
++    }
+     let mut out = Vec::new();
+     if let Some(why) = why {
+         widgets::paragraph(&mut c, t, f, sign_cy + m.dp(88.0), why);
+@@ -738,7 +805,7 @@
+     let leave = l.pick(if matches!(cx.state.data, Data::Open | Data::Erased) { ["完成", "完成", "Done"] } else { NOT_NOW });
+     c.text_center(&f.heading, leave, x, leave_cy, m.row_title_px, t.pal.accent);
+     out.push(Hit { rect: Rect::new(x - m.dp(80.0), leave_cy - m.dp(24.0), m.dp(160.0), m.dp(48.0)), action: Action::Skip });
+-    Frame { header: false, ..Frame::new(t, c, out, l.pick(DECRYPT), 0.0) }
++    Frame { back: false, header: false, ..Frame::new(t, c, out, l.pick(DECRYPT), 0.0) }
+ }
+ 
+ /// What leaves the decrypt page with the data partition left as it is.
+@@ -798,10 +865,19 @@
+     if keys != Keys::Pattern {
+         widgets::code_dots(&mut c, t, x, bottom - m.dp(92.0), s.code.chars().count());
+     }
++    // Whether the screen lock is kept, so that the partition opens as the
++    // recovery starts next time without anyone typing it.
++    let mark = if s.remember { "●" } else { "○" };
++    let kept = tr!(l, "{mark} 记住密码，下次自动解密", "{mark} 記住密碼，下次自動解密", "{mark} Remember the screen lock and decrypt next time");
++    c.text_center(&f.body, &kept, x, bottom - m.dp(136.0), m.sub_px, if s.remember { t.pal.accent } else { t.pal.subtitle });
++    out.push(Hit {
++        rect: Rect::new(x - m.dp(160.0), bottom - m.dp(160.0), m.dp(320.0), m.dp(48.0)),
++        action: Action::Remember,
++    });
+     let skip_cy = bottom - m.dp(34.0);
+     c.text_center(&f.heading, l.pick(NOT_NOW), x, skip_cy, m.row_title_px, t.pal.accent);
+     out.push(Hit { rect: Rect::new(x - m.dp(80.0), skip_cy - m.dp(24.0), m.dp(160.0), m.dp(48.0)), action: Action::Skip });
+-    Frame { header: false, pattern, ..Frame::new(t, c, out, l.pick(DECRYPT), 0.0) }
++    Frame { back: false, header: false, pattern, ..Frame::new(t, c, out, l.pick(DECRYPT), 0.0) }
+ }
+ 
+ /// What a slot is shown as where the boot control could not be read.
+@@ -2879,8 +2955,14 @@
+     let mut out = Vec::new();
+     let top = t.m.content_top;
+     let on = !matches!(w.power, Power::Off | Power::Failed(_));
+-    let switch = widgets::list(&mut c, t, f, top, &[Row::new(l.pick(WLAN)).trail(Trail::Switch(on))]);
+-    out.extend(hits(&switch.rows, &[Action::Toggle(Switch::Wlan)]));
++    // The WLAN's switch, and the two settings that go with it: opened at
++    // start, and the password kept.
++    let switch = widgets::list(&mut c, t, f, top, &[
++        Row::new(l.pick(WLAN)).trail(Trail::Switch(on)),
++        Row::new(l.pick(WLAN_AUTO)).trail(Trail::Switch(s.wlan_auto)),
++        Row::new(l.pick(WLAN_KEEP)).trail(Trail::Switch(s.wlan_keep)),
++    ]);
++    out.extend(hits(&switch.rows, &[Action::Toggle(Switch::Wlan), Action::Toggle(Switch::WlanAuto), Action::Toggle(Switch::WlanKeep)]));
+     let mut y = switch.bottom;
+     match &w.power {
+         Power::Off => {
+diff -ruN '--exclude=target' '--exclude=.git' a/crates/skyward-ui/src/progress.rs b/crates/skyward-ui/src/progress.rs
+--- a/crates/skyward-ui/src/progress.rs	1970-01-01 00:00:00.000000000 +0000
++++ b/crates/skyward-ui/src/progress.rs	2026-11-11 08:51:20.946786028 +0000
+@@ -0,0 +1,60 @@
++//! How far the phone's parts have come up, so a page can say what it is
++//! waiting for instead of standing still without a word. The recovery draws
++//! its first frame before any of this is done; the work itself runs behind
++//! the screen and reports here as it passes each stage.
++//!
++//! Taken from the debug branch of PXIAOHE's fork (commit 5c2b7e24), which
++//! draws the ring and the bar on the decrypt page from it.
++
++use std::sync::atomic::{AtomicU8, Ordering};
++use std::sync::OnceLock;
++use std::time::Instant;
++
++/// Nothing has begun: the screen has just been drawn.
++pub const BEGIN: u8 = 0;
++/// The phone's own partitions are being mounted.
++pub const PARTITIONS: u8 = 1;
++/// The drivers the recovery needs are being loaded.
++pub const DRIVERS: u8 = 2;
++/// The phone's service descriptions are being published to its directory.
++pub const DESCRIPTIONS: u8 = 3;
++/// The phone's own services are being started.
++pub const SERVICES: u8 = 4;
++/// Everything the pages wait for is up.
++pub const READY: u8 = 5;
++
++static STAGE: AtomicU8 = AtomicU8::new(BEGIN);
++
++/// Where the work has come to.
++pub fn stage() -> u8 {
++    STAGE.load(Ordering::Relaxed)
++}
++
++/// Say the work has come this far.
++pub fn reached(stage: u8) {
++    STAGE.store(stage, Ordering::Relaxed);
++}
++
++/// What a page says it is waiting for, in the order the work passes it.
++pub fn waiting(stage: u8) -> [&'static str; 3] {
++    match stage {
++        BEGIN => ["正在准备手机的分区", "正在準備手機的分割區", "Getting the phone's partitions ready"],
++        PARTITIONS => ["正在挂载分区", "正在掛載分割區", "Mounting the partitions"],
++        DRIVERS => ["正在加载驱动", "正在載入驅動程式", "Loading the drivers"],
++        DESCRIPTIONS => ["正在登记系统服务", "正在登記系統服務", "Registering the system services"],
++        SERVICES => ["正在启动系统服务", "正在啟動系統服務", "Starting the system services"],
++        _ => ["正在读取锁屏方式", "正在讀取螢幕鎖定方式", "Reading the screen lock"],
++    }
++}
++
++/// Milliseconds since the screen first asked, for the ring that turns while
++/// the work runs: a page is drawn again every frame it is still going.
++pub fn phase_ms() -> u64 {
++    static START: OnceLock<Instant> = OnceLock::new();
++    START.get_or_init(Instant::now).elapsed().as_millis() as u64
++}
++
++/// How much of the work is behind us, from none to all of it.
++pub fn done() -> f32 {
++    (stage() as f32 / READY as f32).clamp(0.0, 1.0)
++}
