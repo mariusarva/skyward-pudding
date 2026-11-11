@@ -28,8 +28,9 @@
 - **不解密 999（分身）**：HyperOS 的第二空间凭据由主用户代持，开它是页面没在等的第二次解锁，会卡住；直接跳过，主用户照常解密
 - **触摸等待放宽到 10 秒**：面板后到会自动恢复触摸，不再误判成“没有面板”
 - **文件管理提到首页**：首页工具区第一行就是文件管理，高级页里的入口也保留
-- **WiFi 自动连接**：设置里一个开关，打开后启动时自动开 WiFi 并用记住的密码连上次的网络；关掉即忘记。密码明文存在 `/metadata/skyward/wlan`（0600，root）
-- **连接提速**：等网络时每 3 秒补一次扫描（原来只扫一次，要等 supplicant 自己那轮）；DHCP 失败后 3 秒重试（原来 10 秒）
+- **WiFi 两个开关**：「自动连接」启动时开 WiFi 并连记住的网络；「记住密码」连上后保存密码，关掉立即忘记。密码明文存在 `/metadata/skyward/wlan`（0600，root）
+- **WiFi 起不来的两种情形都兜住**：驱动先建 `/sys/class/net/wlan0` 再应答 ioctl，中间撞上 ENODEV 会重试；整条起不来时自动重开，最多 3 次
+- **连接提速**：等网络时每 3 秒补一次扫描；DHCP 失败 3 秒重试；WLAN 驱动提前到服务启动阶段加载（实测开 WLAN 到联网从 19.4 秒降到 12.5 秒）
 
 ## 下载与刷入
 
@@ -38,7 +39,7 @@
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 b
-fastboot flash recovery_b skyward-pudding-20261111-v23-OS4.0.4.0.XPCCNXM.img
+fastboot flash recovery_b skyward-pudding-20261111-v24-OS4.0.4.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进，别用 fastboot reboot recovery
 ```
@@ -50,8 +51,8 @@ adb reboot recovery                          # 从系统进，别用 fastboot re
 ## 校验
 
 ```
-sha256  a1f66a53ea378cf13bfeb1d664410da5c87d214dd3699ce733ec777558de19a5
-md5     e74a97a641e8c363438a8d6839dc1af8
+sha256  cad8673aabe266101f46a6cfed4225d8e32def3ddae487f35e0377195dedb420
+md5     3dd4f13fcc2498a5c60f05fb8bf6c163
 大小    104857600
 ```
 
@@ -64,7 +65,7 @@ tar xzf skyward.tar.gz
 cd skyward-0.2.0
 
 # 2) 打本仓库的补丁
-patch -p1 < ../patches/skyward-pudding-v23.patch
+patch -p1 < ../patches/skyward-pudding-v24.patch
 
 # 3) 交叉编译（宿主 aarch64 也能编，见 docs/开发记录.md 的“两个坑”）
 rustup target add aarch64-linux-android
