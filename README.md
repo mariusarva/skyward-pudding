@@ -75,6 +75,18 @@ python3 scripts/avbwrap.py ramdisk.lz4 out.img
 
 `scripts/avbwrap.py` 的用法：把新 ramdisk 打包成 boot v4 镜像，并按原厂布局补 AVB 头与尾（自检能把原包逐字节重建）。
 
+## 上游更新了怎么办
+
+**不要用 REC 里的「检查更新」**：它问的是上游 `kirklin/skyward` 的 release，只认 `skyward-<tag>-pudding-*.zip`。上游没有 pudding 包时按了没用；真发了 pudding 包，它会直接覆盖 recovery 分区，把这份的改动全冲掉。
+
+正确做法是重编，`scripts/update-upstream.sh` 把流程固化了：
+
+```sh
+RAMDISK=/path/to/ramdisk scripts/update-upstream.sh v0.3.0
+```
+
+补丁冲突的文件清单与手工合并办法见 `docs/开发记录.md` 第 11 节。
+
 ## 已知限制
 
 - 只针对 `pudding` / OS4.0.4.0.XPCCNXM 验证过，其他机型不要刷
