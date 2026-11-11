@@ -59,7 +59,13 @@ jobs:
           echo "补丁：$PATCH"
           cd src
           patch --version | head -1
-          patch -p1 --batch --forward --no-backup-if-mismatch < "../$PATCH"
+          patch -p1 --batch --no-backup-if-mismatch < "../$PATCH" || true
+          if find . -name '*.rej' | head -1 | grep -q .; then
+            echo "补丁有冲突："
+            find . -name '*.rej' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
+            exit 1
+          fi
+          echo "补丁打上了"
 
       - name: 交叉编译
         run: |
