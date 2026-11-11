@@ -1,6 +1,22 @@
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/main.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-11 01:48:54.992999940 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/backup.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/backup.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/backup.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/backup.rs	2026-11-11 06:05:41.560999924 +0000
+@@ -423,8 +423,11 @@
+                     copied.with_context(|| format!("back up {name}"))?;
+                 }
+                 Source::Data => {
+-                    archive::pack(Path::new(DATA), &skipped, &mut writer, cancel, &mut |done| telling.done(done))
++                    let locked = archive::pack(Path::new(DATA), &skipped, &mut writer, cancel, &mut |done| telling.done(done))
+                         .context("back up the data partition's files")?;
++                    if locked > 0 {
++                        skyward_sys::kmsg(&format!("{locked} files needed a key the recovery does not hold; left out of the backup"))?;
++                    }
+                 }
+             }
+             items.push(Item { part: *part, name: name.clone(), stored: writer.finish()? });
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/main.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-11 01:48:54.992999940 +0000
 @@ -26,6 +26,8 @@
  #[cfg(target_os = "android")]
  mod relabel;
@@ -164,9 +180,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
  /// Map and mount the slot's partitions from super, then bring up what runs
  /// from them. Recovery has to stay usable when super cannot be mounted, as
  /// after it is wiped, so the reason goes to the kernel log instead.
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/remember.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/remember.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
 @@ -0,0 +1,60 @@
 +//! The screen lock a user chose to have kept, so that the data partition
 +//! opens as the recovery starts rather than waiting for it to be typed.
@@ -228,9 +244,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
 +        Err(e) => Err(e).with_context(|| format!("remove {FILE}")),
 +    })
 +}
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/ui.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-11 02:35:25.912999002 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/ui.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-11 06:37:42.973999932 +0000
 @@ -3,6 +3,8 @@
  use crate::filework;
  use crate::haptics::Haptics;
@@ -240,7 +256,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
  use crate::input::{monotonic_ms, Event, Inputs};
  use crate::merge;
  use crate::partwork;
-@@ -62,7 +64,7 @@
+@@ -62,13 +64,43 @@
  
  /// How long after the screen starts a touch panel may still come up; with
  /// none by then, the pages are worked with the keys, their light shown.
@@ -249,7 +265,43 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
  
  /// How long a panel gone dark rests, ready to light again at once, before
  /// the display turns off; the phone's own system keeps its panel dozing
-@@ -982,6 +984,9 @@
+ /// about as long after the screen goes off.
+ const REST: Duration = Duration::from_secs(5);
+ 
++/// Where the display says what it did, in a file that outlives a restart: a
++/// page whose panel will not light cannot be asked to export its logs, so the
++/// transitions are written here as they happen, where the system that follows
++/// can still read them.
++const DISPLAY_NOTE: &str = "/metadata/skyward/display";
++
++/// Say what the display did: to the kernel log, and to the file a restart
++/// keeps. Writing the file is best effort -- a page that cannot write it still
++/// works.
++fn note(text: &str) -> Result<()> {
++    skyward_sys::kmsg(text)?;
++    let at = Path::new(DISPLAY_NOTE);
++    if let Some(dir) = at.parent() {
++        let _ = fs::create_dir_all(dir);
++        let metadata = Path::new("/metadata");
++        let mounted = skyward_block::mount::is_mount_point(metadata).unwrap_or(false);
++        if mounted {
++            let _ = skyward_block::mount::remount_writable(metadata, true);
++        }
++        if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(at) {
++            use std::io::Write;
++            let _ = writeln!(file, "{text}");
++        }
++        if mounted {
++            let _ = skyward_block::mount::remount_writable(metadata, false);
++        }
++    }
++    Ok(())
++}
++
+ /// Where logs saved to the temporary folder go, in the recovery service's
+ /// own folder, and where in internal storage the others do.
+ const TMP_LOGS: &str = "/skyward/run/logs";
+@@ -982,6 +1014,9 @@
      Options { keep: app.state.keep_recovery && app.state.recovery_partitions, signed: app.state.check_signature }
  }
  
@@ -259,7 +311,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
  /// How often the WLAN page scans while it shows.
  const SCAN_EVERY: Duration = Duration::from_secs(10);
  
-@@ -1057,6 +1062,7 @@
+@@ -1057,6 +1092,7 @@
      let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;
      let started = Instant::now();
      let mut touch_known = false;
@@ -267,7 +319,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
      // adbd and fastbootd ask over it to go over to fastboot and back.
      let control = Control::open()?;
      let mut haptics = cfg.haptics.as_ref().map(Haptics::open).transpose()?;
-@@ -1105,6 +1111,13 @@
+@@ -1105,6 +1141,13 @@
      // and the users whose own files are still closed once it is open.
      let mut decryptor: Option<Decryptor> = None;
      let mut closed: Vec<Closed> = Vec::new();
@@ -281,7 +333,19 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
      let mut arriving = Some(Incoming::Arrived);
      // The mount page shows the partitions as they are when it opens and
      // after each change; why they cannot be read is the page's to say.
-@@ -1355,6 +1368,18 @@
+@@ -1124,6 +1167,11 @@
+     // Whether the panel's frame memory has been blacked out for an off
+     // panel; cleared once a real frame is shown again.
+     let mut blanked = false;
++    // Where the display stands, for the log: whether it is lit, when it went
++    // dark, and whether the phone was let sleep.
++    let mut was_lit = true;
++    let mut dark_at: Option<Instant> = None;
++    let mut could_sleep = false;
+     // When the panel gone dark began to rest.
+     let mut rested_at: Option<Instant> = None;
+     // Started for fastboot, the port goes to the phone's own fastbootd. The
+@@ -1355,6 +1403,18 @@
          None => None,
      };
      let mut scanned_at = Instant::now();
@@ -300,7 +364,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
      app.state.update_server = cfg.update.is_some();
      // Asking the update server, and downloading the full package.
      let mut checker: Option<updates::Worker> = None;
-@@ -1374,6 +1399,17 @@
+@@ -1374,6 +1434,17 @@
      let mut drive_at = Instant::now();
      loop {
          let now = monotonic_ms();
@@ -318,7 +382,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
          if leave_at.is_some_and(|at| now >= at) {
              leave_at = None;
              power(leave)?;
-@@ -1383,8 +1419,17 @@
+@@ -1383,8 +1454,17 @@
              if !inputs.has_panel() {
                  skyward_sys::kmsg("no touch panel came up; the pages are worked with the keys")?;
                  app.touchscreen_missing();
@@ -336,7 +400,71 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
          for fx in app.tick(now) {
              match fx {
                  Effect::Haptic => {
-@@ -1913,9 +1958,81 @@
+@@ -1405,6 +1485,8 @@
+         let time = clock(app.state.time_zone)?;
+         if time != shown_clock {
+             shown_clock = time;
++            let date = skyward_ui::fmt::date(app.state.lang, unix_now()?, app.state.time_zone);
++            app.set_date(date);
+             app.redraw();
+         }
+         for reading in readings.taken() {
+@@ -1440,6 +1522,18 @@
+             port_at = Instant::now();
+         }
+         let panel = app.panel(now);
++        let lit = panel.is_some();
++        if lit != was_lit {
++            match (lit, dark_at.take()) {
++                (false, _) => {
++                    dark_at = Some(Instant::now());
++                    note("the display is dark")?;
++                }
++                (true, Some(at)) => note(&format!("the display is lit again after {} ms", at.elapsed().as_millis()))?,
++                (true, None) => note("the display is lit")?,
++            }
++            was_lit = lit;
++        }
+         let mut shown = false;
+         if panel.is_some() {
+             // A display turned off comes on again with a frame drawn for it.
+@@ -1481,9 +1575,12 @@
+             surface.rest()?;
+             rested_at = Some(Instant::now());
+         } else if rested_at.is_some_and(|at| at.elapsed() >= REST) {
+-            // Rested long enough, the display goes off: the panel and the
+-            // display processor feeding it stop drawing power.
+-            surface.turn_off()?;
++            // The panel stays at rest rather than being stopped. On this
++            // phone a display whose CRTC was turned off did not come back
++            // when the power key woke the page (2026-11-11), while a panel
++            // at rest lights again at once; the phone then also keeps out of
++            // suspend, which needs the display off.
++            note("the display rests; the panel is not stopped")?;
+             rested_at = None;
+         }
+         // A page at rest draws the rows it has yet to while nothing else
+@@ -1530,6 +1627,10 @@
+             && !running
+             && asked.is_none()
+             && usb_link()? != UsbLink::Connected;
++        if may_sleep != could_sleep {
++            note(if may_sleep { "the phone may sleep now" } else { "the phone has to stay awake" })?;
++            could_sleep = may_sleep;
++        }
+         sleeper.allow(may_sleep);
+         let mut fds = vec![inputs.fd(), uevents.fd(), sleeper.fd()];
+         if let Some(i) = &installer {
+@@ -1585,7 +1686,7 @@
+         let now = monotonic_ms();
+         for slept in sleeper.slept() {
+             match slept {
+-                Slept::Woke => skyward_sys::kmsg("the phone slept and woke")?,
++                Slept::Woke => note("the phone slept and woke")?,
+                 Slept::Refused(why) => skyward_sys::kmsg(&format!("the phone did not sleep: {why}"))?,
+             }
+         }
+@@ -1913,9 +2014,81 @@
                  app.set_traffic(t);
              }
          }
@@ -419,7 +547,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
          if app.screen() == Screen::Wlan && wlan_on && scanned_at.elapsed() >= SCAN_EVERY {
              scanned_at = Instant::now();
              wlan_worker(&wlan)?.send(wlan::Command::Scan);
-@@ -2035,6 +2152,20 @@
+@@ -2035,6 +2208,20 @@
                      }
                      closed = opening.closed;
                      show_closed(&mut app, &closed)?;
@@ -440,7 +568,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
                  }
                  decrypt::Ended::Opened(Err(why)) => {
                      skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
-@@ -2051,11 +2182,42 @@
+@@ -2051,11 +2238,42 @@
                      app.data_failed(why);
                  }
                  decrypt::Ended::Unlocked(Ok(still)) => {
@@ -483,7 +611,28 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
                      app.unlock_failed(why, now);
                  }
              }
-@@ -2295,13 +2457,28 @@
+@@ -2116,8 +2334,18 @@
+                     skyward_sys::kmsg(&format!("asked on the recovery socket: {asked:?}"))?;
+                     answer(asked, fastboot)
+                 }
+-                Incoming::Input(Event::Touch(t, at)) => app.touch(t, &fonts, at),
+-                Incoming::Input(Event::Key(k, true)) => app.key(k, now),
++                Incoming::Input(Event::Touch(t, at)) => {
++                    if !app.panel_lit() {
++                        note("a touch came while the display was dark")?;
++                    }
++                    app.touch(t, &fonts, at)
++                }
++                Incoming::Input(Event::Key(k, true)) => {
++                    if !app.panel_lit() {
++                        note("a key came while the display was dark")?;
++                    }
++                    app.key(k, now)
++                }
+                 Incoming::Input(Event::Key(k, false)) => app.key_up(k, now),
+             };
+             // What the pages ask for in answer to the work done goes on
+@@ -2295,13 +2523,28 @@
                      // under way, and takes nothing more until it is done.
                      Effect::OpenData => {
                          ensure!(decryptor.is_none(), "the data partition is being opened already");
@@ -513,7 +662,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
                      Effect::ReadDir(folder) => list(&mut app, folder)?,
                      Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,
                      // A name taken where an entry goes is the user's to
-@@ -2465,11 +2642,33 @@
+@@ -2465,11 +2708,33 @@
                          merger = Some(merge::Merger::start(slot, true)?);
                      }
                      Effect::Wlan(on) => wlan_worker(&wlan)?.send(if on { wlan::Command::On } else { wlan::Command::Off }),
@@ -547,7 +696,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
                          wlan_worker(&wlan)?.send(wlan::Command::Join { ssid, name, security, password: password.0 })
                      }
                      Effect::LeaveWlan => wlan_worker(&wlan)?.send(wlan::Command::Leave),
-@@ -2502,7 +2701,8 @@
+@@ -2502,7 +2767,8 @@
                      Effect::CheckSkyward => {
                          ensure!(skyward_checker.is_none(), "GitHub is being asked already");
                          let probe = cfg.wlan.as_ref().context("the phone's WLAN is not brought up")?.probe.clone();
@@ -557,9 +706,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
                          skyward_checker = Some(updates::Worker::start(task, servers.clone())?);
                      }
                      // The zip goes into the recovery's own folder, which is
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/updates.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/updates.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/updates.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/updates.rs	2026-11-11 02:42:24.256998843 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/updates.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/updates.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/updates.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/updates.rs	2026-11-11 02:42:24.256998843 +0000
 @@ -42,7 +42,7 @@
      /// Ask GitHub for Skyward's newest release and its zip for the phone
      /// `codename` names; where that fails, `probe` says whether the network
@@ -586,9 +735,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
                          tell(Event::SkywardChecked(answer));
                      }
                      // GitHub's API hands the zip out at a short-lived address
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/wlan.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/wlan.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-11 01:48:54.992999940 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/wlan.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/wlan.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-11 01:48:54.992999940 +0000
 @@ -55,8 +55,10 @@
  /// goes.
  const TRAFFIC: Duration = Duration::from_secs(1);
@@ -660,9 +809,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
  }
  
  /// Put a file the driver asks for where the firmware loader looks.
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/wlanmem.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/wlanmem.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward/src/wlanmem.rs	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward/src/wlanmem.rs	2026-11-11 01:40:17.408999970 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/wlanmem.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/wlanmem.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward/src/wlanmem.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward/src/wlanmem.rs	2026-11-11 01:40:17.408999970 +0000
 @@ -0,0 +1,183 @@
 +//! The WLAN a user chose to have kept: whether it is opened as the recovery
 +//! starts, whether the password of the network joined last is kept, and that
@@ -847,9 +996,81 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
 +        assert_eq!(render(&kept), "auto=1\nkeep=0\n");
 +    }
 +}
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-config/src/lib.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-config/src/lib.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-config/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-config/src/lib.rs	2026-11-11 02:35:25.908999002 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-backup/src/archive.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-backup/src/archive.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-backup/src/archive.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-backup/src/archive.rs	2026-11-11 06:37:42.965999932 +0000
+@@ -99,13 +99,20 @@
+ /// `skipped`, sockets, which only the program that made them answers, and
+ /// what another filesystem mounted inside holds. A folder comes before what
+ /// it holds. Tells how many bytes of file contents are archived so far.
+-pub fn pack(root: &Path, skipped: &Skipped, out: impl Write, cancel: &AtomicBool, progress: &mut dyn FnMut(u64)) -> Result<()> {
++pub fn pack(root: &Path, skipped: &Skipped, out: impl Write, cancel: &AtomicBool, progress: &mut dyn FnMut(u64)) -> Result<usize> {
+     let mut b = Builder::new(out);
+     let meta = fs::symlink_metadata(root).with_context(|| format!("look at {}", root.display()))?;
+-    let mut packing = Packing { links: HashMap::new(), done: 0, cancel, progress };
++    let mut packing = Packing { links: HashMap::new(), done: 0, cancel, progress, locked: 0 };
+     packing.folder(&mut b, root, Path::new(""), meta.dev(), skipped, key(root)?.as_deref())?;
+     b.into_inner().context("finish the archive")?.flush().context("finish the archive")?;
+-    Ok(())
++    Ok(packing.locked)
++}
++
++/// Whether `e` is a file this recovery cannot read now rather than one that
++/// is broken: a key it does not hold, as the second space's files keep theirs
++/// behind the owner's credential, or a permission the running system set.
++fn locked(e: &io::Error) -> bool {
++    matches!(e.raw_os_error(), Some(1) | Some(13) | Some(126))
+ }
+ 
+ struct Packing<'a> {
+@@ -115,6 +122,9 @@
+     done: u64,
+     cancel: &'a AtomicBool,
+     progress: &'a mut dyn FnMut(u64),
++    /// Files left out because this recovery cannot read them, such as those
++    /// whose key the second space keeps behind the owner's credential.
++    locked: usize,
+ }
+ 
+ impl Packing<'_> {
+@@ -177,7 +187,16 @@
+             }
+             header.set_entry_type(EntryType::Regular);
+             header.set_size(meta.len());
+-            let file = File::open(path)?;
++            let file = match File::open(path) {
++                Ok(file) => file,
++                Err(e) if locked(&e) => {
++                    // Counted and left out: a file whose key is not here now
++                    // is no reason to lose the rest of the backup.
++                    self.locked += 1;
++                    return Ok(());
++                }
++                Err(e) => return Err(e).with_context(|| format!("open {}", path.display())),
++            };
+             let feed = Feed { file, left: meta.len(), done: &mut self.done, cancel: self.cancel, progress: &mut *self.progress };
+             b.append_data(&mut header, rel, feed)?;
+         } else {
+@@ -562,7 +581,15 @@
+ #[cfg(target_os = "android")]
+ fn fs_attributes(path: &Path) -> Result<FsXattr> {
+     use std::os::fd::AsRawFd;
+-    let file = open_bare(path)?;
++    // The second space keeps its files behind the owner's credential, and
++    // this recovery leaves them closed: asking the kernel about one answers
++    // ENOKEY, and the file is left out of the archive rather than the whole
++    // backup failing.
++    let file = match open_bare(path) {
++        Ok(file) => file,
++        Err(e) if e.downcast_ref::<io::Error>().is_some_and(locked) => return Ok(FsXattr::default()),
++        Err(e) => return Err(e),
++    };
+     let mut fsx = FsXattr::default();
+     if unsafe { libc::ioctl(file.as_raw_fd(), FS_IOC_FSGETXATTR, &mut fsx) } != 0 {
+         let e = io::Error::last_os_error();
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-config/src/lib.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-config/src/lib.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-config/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-config/src/lib.rs	2026-11-11 02:35:25.908999002 +0000
 @@ -169,6 +169,11 @@
  pub struct Update {
      /// Where the questions are sent.
@@ -862,9 +1083,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
  }
  
  /// What a backup takes in and leaves out beyond what every Android phone
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-crypto/src/data.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-crypto/src/data.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
 @@ -32,6 +32,12 @@
  /// The phone's owner, the first of its users.
  const OWNER: u32 = 0;
@@ -930,9 +1151,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
          lock,
      })
  }
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-info/src/lib.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-info/src/lib.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-info/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-info/src/lib.rs	2026-11-11 02:42:24.256998843 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-info/src/lib.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-info/src/lib.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-info/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-info/src/lib.rs	2026-11-11 02:42:24.256998843 +0000
 @@ -13,6 +13,14 @@
  /// Version of this build, shown on the About page.
  pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -948,9 +1169,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
  const CPU: &str = "/sys/devices/system/cpu";
  const POWER_SUPPLY: &str = "/sys/class/power_supply";
  const SYS_BLOCK: &str = "/sys/class/block";
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-modules/src/lib.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-11 01:54:42.552999934 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-modules/src/lib.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-11 01:54:42.552999934 +0000
 @@ -25,6 +25,12 @@
  /// loaded. Returns the files loaded, dependencies first.
  pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
@@ -1004,9 +1225,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
  /// A `modules.dep` graph: each module file mapped to the module files it
  /// depends on. Keys and values are reduced to bare file names so the graph is
  /// independent of where the modules were sourced from (GKI devices keep them
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-net/src/github.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-net/src/github.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-net/src/github.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-net/src/github.rs	2026-11-11 05:12:58.564999963 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-net/src/github.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-net/src/github.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-net/src/github.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-net/src/github.rs	2026-11-11 05:12:58.564999963 +0000
 @@ -76,8 +76,8 @@
      let release: Release = serde_json::from_str(answer).context("read GitHub's answer")?;
      let tag = release.tag_name;
@@ -1055,9 +1276,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
      if !status.is_success() {
          bail!(refusal(status, &body));
      }
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-net/src/iface.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-net/src/iface.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-net/src/iface.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-net/src/iface.rs	2026-11-11 01:33:35.460999970 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-net/src/iface.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-net/src/iface.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-net/src/iface.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-net/src/iface.rs	2026-11-11 01:33:35.460999970 +0000
 @@ -76,6 +76,13 @@
      Ok(mac)
  }
@@ -1072,9 +1293,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
  /// Bring the interface up, or take it down.
  pub fn set_up(interface: &str, up: bool) -> Result<()> {
      let fd = socket()?;
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-ui/src/app.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-11 01:40:25.940999966 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-ui/src/app.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-11 06:46:20.877999946 +0000
 @@ -557,6 +557,10 @@
      /// over.
      KeepRecovery,
@@ -1095,7 +1316,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
      Back,
      Theme { dark: bool },
      Toggle(Switch),
-@@ -1671,6 +1677,17 @@
+@@ -1671,6 +1677,19 @@
      /// lock its users' own files wait on.
      pub data: Data,
      pub code: String,
@@ -1105,6 +1326,8 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
 +    /// Whether the phone's own partitions and services are up. Until they
 +    /// are, the data page says it waits for them.
 +    pub prepared: bool,
++    /// The day, as the lock shows it above the time.
++    pub date: String,
 +    /// Whether the WLAN is opened as the recovery starts, joining the network
 +    /// whose password is kept beside the recovery's own settings.
 +    pub wlan_auto: bool,
@@ -1113,18 +1336,19 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
      /// What is typed in the search field.
      pub search: String,
      /// The on-screen keyboard's layer.
-@@ -1799,6 +1816,10 @@
+@@ -1799,6 +1818,11 @@
              system_notice: None,
              data: Data::Closed,
              code: String::new(),
 +            remember: false,
 +            prepared: false,
++            date: String::new(),
 +            wlan_auto: false,
 +            wlan_keep: false,
              search: String::new(),
              layer: Layer::Letters,
              held: None,
-@@ -2011,6 +2032,8 @@
+@@ -2011,6 +2035,8 @@
      /// knows, telling what waits with [`App::data_waiting`] or why it did
      /// not open with [`App::data_failed`].
      OpenData,
@@ -1133,7 +1357,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
      /// Open the own files of `user` with what they entered at their screen
      /// lock, telling what still waits with [`App::data_waiting`] or why it
      /// did not open with [`App::unlock_failed`].
-@@ -2103,6 +2126,10 @@
+@@ -2103,6 +2129,10 @@
      /// Turn the WLAN on or off; how it stands comes back with
      /// [`App::set_wlan`].
      Wlan(bool),
@@ -1144,7 +1368,137 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
      ScanWlan,
      JoinWlan { ssid: Vec<u8>, name: String, security: Security, password: Secret },
      LeaveWlan,
-@@ -5137,6 +5164,11 @@
+@@ -2587,6 +2617,21 @@
+     (strip, top)
+ }
+ 
++/// What a locked screen holds: when the panel went dark, and how far the knob
++/// has been slid along.
++struct Lock {
++    since: u64,
++    drag: f32,
++    /// Whether the finger went down on the knob rather than elsewhere.
++    held: bool,
++}
++
++/// How much of the track the knob must reach for the lock to give way.
++const UNLOCK_AT: f32 = 0.96;
++
++/// How long the power key is held on the lock for the reboot page to open.
++const POWER_HOLD_MS: u64 = 1200;
++
+ pub struct App {
+     pub state: State,
+     /// The pages open, the one shown last: each with how far it is
+@@ -2676,6 +2721,12 @@
+     /// When the panel last lit from dark, for the brief guard that keeps a
+     /// stray touch or key from acting on a page just put up.
+     woke_at: Option<u64>,
++    /// The lock the page sits behind once the panel went dark: a clock and a
++    /// knob to slide, so that a touch meant for nothing does not work the
++    /// pages.
++    lock: Option<Lock>,
++    /// When the power key went down on the lock, to tell a press from a hold.
++    lock_press: Option<u64>,
+     /// The panel at full brightness, or easing to the dim level it takes
+     /// shortly before going off.
+     bright: Fade,
+@@ -2771,6 +2822,8 @@
+             display_on: true,
+             active: None,
+             woke_at: None,
++            lock: None,
++            lock_press: None,
+             bright: full_brightness(),
+             curtain: Fade::shown(BRIGHTEN, DARKEN),
+             darkening: None,
+@@ -2815,6 +2868,19 @@
+         self.top().0
+     }
+ 
++    /// The day the lock shows, drawn when the panel is lit on it.
++    pub fn set_date(&mut self, date: String) {
++        if self.state.date != date {
++            self.state.date = date;
++            self.dirty = true;
++        }
++    }
++
++    /// Whether the panel is lit: what the pages show, or nothing at all.
++    pub fn panel_lit(&self) -> bool {
++        self.display_on
++    }
++
+     fn top(&self) -> &(Screen, f32, Focus) {
+         self.stack.last().expect("the page stack always holds a page")
+     }
+@@ -3192,6 +3258,7 @@
+         self.darkening = self.panel(now);
+         self.curtain.set(false, now);
+         self.display_on = false;
++        self.lock = Some(Lock { since: now, drag: 0.0, held: false });
+         self.bright = full_brightness();
+         match std::mem::replace(&mut self.drag, Drag::Idle) {
+             Drag::Confirm { .. } => {
+@@ -4231,9 +4298,57 @@
+         if charge > 0.0 {
+             self.compose_charging(out, f, info, charge, now);
+         }
++        if let Some(lock) = &self.lock {
++            let (drag, since) = (lock.drag, lock.since);
++            self.compose_lock(out, f, info, clock, drag, now.saturating_sub(since));
++        }
+         out.dim(self.curtain.level(now));
+     }
+ 
++    /// Where the lock's knob slides: the bar drawn along the foot of it.
++    fn lock_track(&self) -> Rect {
++        let m = &self.theme().m;
++        let inset = m.margin + m.dp(14.0);
++        let (x, w, h) = (inset, m.w as f32 - inset * 2.0, m.dp(56.0));
++        Rect::new(x, m.h as f32 - m.dp(176.0), w, h)
++    }
++
++    /// The lock over the page: the phone's time, and the knob to slide along.
++    fn compose_lock(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, clock: &str, drag: f32, _since: u64) {
++        let t = self.theme().clone();
++        let m = &t.m;
++        let (w, h) = (m.w as f32, m.h as f32);
++        out.fill_rect(0.0, 0.0, w, h, Rgba::rgb(6, 6, 8).with_alpha(226));
++        if let Ok(face) = f.face(400.0) {
++            if !self.state.date.is_empty() {
++                let px = m.dp(20.0);
++                let width = out.text_width(&face, &self.state.date, px);
++                let baseline = h * 0.245;
++                out.text(&face, &self.state.date, (w - width) / 2.0, baseline, px, Rgba::rgb(158, 162, 172), None);
++            }
++        }
++        if let Ok(face) = f.face(600.0) {
++            let px = m.dp(64.0);
++            let baseline = h * 0.335;
++            let width = out.text_width(&face, clock, px);
++            out.text(&face, clock, (w - width) / 2.0, baseline, px, Rgba::rgb(236, 238, 242), None);
++        }
++        // The battery, under the time, as a phone's lock screen shows it.
++        if let (Ok(face), Some(b)) = (f.face(400.0), info.battery.as_ref()) {
++            let percent = format!("{}%", b.level);
++            let note = match b.charging() {
++                true => format!("{percent} · {}", tr!(self.state.lang, "充电中", "充電中", "Charging")),
++                false => percent,
++            };
++            let px = m.dp(18.0);
++            let width = out.text_width(&face, &note, px);
++            out.text(&face, &note, (w - width) / 2.0, h * 0.375, px, Rgba::rgb(150, 154, 164), None);
++        }
++        let track = self.lock_track();
++        let label = tr!(self.state.lang, "滑动解锁", "滑動解鎖", "Slide to unlock");
++        widgets::confirm(out, &t, f, track.y, &label, false, drag);
++    }
++
+     /// The charging screen, `level` of the way over the page drawn on `out`.
+     fn compose_charging(&mut self, out: &mut Canvas, f: &Fonts, info: &DeviceInfo, level: f32, now: u64) {
+         let battery = info.battery.as_ref().expect("a cable went in on a phone whose battery is read");
+@@ -5137,6 +5252,11 @@
                  return self.arrive_at(s);
              }
              Action::OpenData => return self.open_data(),
@@ -1156,7 +1510,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
              Action::Skip => {
                  self.leave(true);
                  if self.stack.len() > 1 {
-@@ -5163,6 +5195,21 @@
+@@ -5163,6 +5283,21 @@
                  self.refresh();
                  return vec![Effect::Wlan(on)];
              }
@@ -1178,7 +1532,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
              Action::Toggle(switch) => {
                  let on = match switch {
                      Switch::Vibrate => &mut self.state.vibrate,
-@@ -5173,6 +5220,8 @@
+@@ -5173,6 +5308,8 @@
                      Switch::KeepRecovery => &mut self.state.keep_recovery,
                      Switch::ShowPassword => &mut self.state.show_password,
                      Switch::Wlan => unreachable!("the WLAN switch is turned above"),
@@ -1187,7 +1541,53 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
                  };
                  *on = !*on;
                  let now_on = *on;
-@@ -6274,6 +6323,32 @@
+@@ -5964,6 +6101,45 @@
+         if !self.display_on {
+             return Vec::new();
+         }
++        // While the lock shows, only its knob answers: nothing a touch meant
++        // for nothing does reaches the page behind.
++        if self.lock.is_some() {
++            let track = self.lock_track();
++            self.stir(now);
++            match ev {
++                Touch::Down(x, y) => {
++                    let on_knob = x >= track.x && x <= track.x + track.w && y >= track.y && y <= track.y + track.h;
++                    if let Some(lock) = &mut self.lock {
++                        lock.held = on_knob;
++                    }
++                }
++                Touch::Move(x, _) => {
++                    let span = (track.w - track.h).max(1.0);
++                    if let Some(lock) = &mut self.lock {
++                        if lock.held {
++                            lock.drag = ((x - (track.x + track.h / 2.0)) / span).clamp(0.0, 1.0);
++                            self.dirty = true;
++                        }
++                    }
++                }
++                Touch::Up => {
++                    let unlocked = self.lock.as_ref().is_some_and(|l| l.held && l.drag >= UNLOCK_AT);
++                    if let Some(lock) = &mut self.lock {
++                        lock.held = false;
++                        if !unlocked {
++                            lock.drag = 0.0;
++                        }
++                    }
++                    if unlocked {
++                        self.lock = None;
++                        self.refresh();
++                    } else {
++                        self.dirty = true;
++                    }
++                }
++            }
++            return Vec::new();
++        }
+         // A finger on the charging screen sends it away for the page, and
+         // does nothing else until it lifts.
+         if self.charge_shown() {
+@@ -6274,6 +6450,32 @@
          self.dirty = true;
      }
  
@@ -1220,9 +1620,56 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/
      /// A button went down. With the keys working the page, the volume keys
      /// move the light from control to control and the power key works the
      /// one lit as it comes back up; otherwise the first volume press lights
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-ui/src/pages.rs
---- /tmp/tmp.3zUtlt175Y/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.aLF4COziaB/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-11 05:01:37.083840098 +0000
+@@ -6282,6 +6484,22 @@
+     /// goes down first waits [`CHORD_MS`] for the other, or until it is let
+     /// go, and then does what it does alone, as pressed when it went down.
+     pub fn key(&mut self, key: Key, now: u64) -> Vec<Effect> {
++        // Locked, the power key lights the panel onto the lock, and puts it
++        // out again from there; no other key works the page behind it.
++        if self.lock.is_some() {
++            if key == Key::Power {
++                if self.display_on {
++                    // Held long enough, the power key opens the way out of
++                    // the recovery; a plain press puts the panel out again.
++                    self.lock_press = Some(now);
++                } else {
++                    self.wake(now);
++                }
++            } else if self.display_on {
++                self.stir(now);
++            }
++            return Vec::new();
++        }
+         // Any button stops a gliding page, and brings a sliding one to rest.
+         self.fling = None;
+         self.end_turn();
+@@ -6392,6 +6610,23 @@
+     /// partner in a screenshot came, the key waiting for it first does what
+     /// it does alone.
+     pub fn key_up(&mut self, key: Key, now: u64) -> Vec<Effect> {
++        // A power key let go on the lock: held, it opens the reboot page, and
++        // a press puts the panel out again.
++        if self.lock.is_some() && key == Key::Power {
++            let held = self.lock_press.take().map_or(0, |at| now.saturating_sub(at));
++            if held >= POWER_HOLD_MS {
++                self.lock = None;
++                self.open(Screen::Reboot);
++                self.refresh();
++                return Vec::new();
++            }
++            // The press that lit the panel leaves the lock showing: only a
++            // second press, once the panel is up, puts it out.
++            if self.display_on && !self.just_woke(now) {
++                self.sleep(now);
++            }
++            return Vec::new();
++        }
+         let mut fx = match self.chord {
+             Some((first, _)) if first == key => self.let_chord_go(now),
+             _ => Vec::new(),
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-ui/src/pages.rs
+--- /tmp/tmp.15oVCfVVcT/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.F5GNd1gh2J/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-11 05:01:37.083840098 +0000
 @@ -160,6 +160,8 @@
  const WLAN: Text = ["WLAN", "Wi-Fi", "Wi-Fi"];
  const DECRYPT: Text = ["解密", "解密", "Decrypt"];
