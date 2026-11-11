@@ -1,6 +1,6 @@
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/main.rs
---- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-10 15:02:10.955999873 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/main.rs
+--- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-10 23:58:50.909860705 +0000
 @@ -26,6 +26,8 @@
  #[cfg(target_os = "android")]
  mod relabel;
@@ -10,7 +10,16 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
  mod secure;
  #[cfg(target_os = "android")]
  mod services;
-@@ -695,7 +697,7 @@
+@@ -41,6 +43,8 @@
+ mod wipe;
+ #[cfg(target_os = "android")]
+ mod wlan;
++#[cfg(target_os = "android")]
++mod wlanmem;
+ 
+ #[derive(Parser)]
+ #[command(name = "skyward", version, about = "Skyward recovery")]
+@@ -695,7 +699,7 @@
          if !request.work.lasts() {
              bcb::clear(&misc)?;
          }
@@ -19,7 +28,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
          skyward_sys::kmsg(&format!(
              "{} {} recovery up, misc command {:?} args {:?}, asking for {:?}",
              cfg.device.codename,
-@@ -748,10 +750,30 @@
+@@ -748,10 +752,30 @@
              // erasing them, which may take super with them, and undoing
              // shared blocks, which writes to the slot's own.
              if !matches!(request.work, bcb::Work::Fastboot | bcb::Work::WipeAb { .. } | bcb::Work::UnshareBlocks) {
@@ -52,7 +61,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
          }
          #[cfg(not(target_os = "android"))]
          {
-@@ -763,6 +785,86 @@
+@@ -763,6 +787,86 @@
      })
  }
  
@@ -139,9 +148,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
  /// Map and mount the slot's partitions from super, then bring up what runs
  /// from them. Recovery has to stay usable when super cannot be mounted, as
  /// after it is wiped, so the reason goes to the kernel log instead.
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/remember.rs
---- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/remember.rs
+--- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
 @@ -0,0 +1,60 @@
 +//! The screen lock a user chose to have kept, so that the data partition
 +//! opens as the recovery starts rather than waiting for it to be typed.
@@ -203,18 +212,19 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
 +        Err(e) => Err(e).with_context(|| format!("remove {FILE}")),
 +    })
 +}
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/ui.rs
---- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-10 15:25:37.935999970 +0000
-@@ -3,6 +3,7 @@
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/ui.rs
+--- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-10 23:59:40.117860686 +0000
+@@ -3,6 +3,8 @@
  use crate::filework;
  use crate::haptics::Haptics;
  use crate::relabel;
 +use crate::remember;
++use crate::wlanmem;
  use crate::input::{monotonic_ms, Event, Inputs};
  use crate::merge;
  use crate::partwork;
-@@ -62,7 +63,7 @@
+@@ -62,7 +64,7 @@
  
  /// How long after the screen starts a touch panel may still come up; with
  /// none by then, the pages are worked with the keys, their light shown.
@@ -223,7 +233,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
  
  /// How long a panel gone dark rests, ready to light again at once, before
  /// the display turns off; the phone's own system keeps its panel dozing
-@@ -1057,6 +1058,7 @@
+@@ -1057,6 +1059,7 @@
      let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;
      let started = Instant::now();
      let mut touch_known = false;
@@ -231,7 +241,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
      // adbd and fastbootd ask over it to go over to fastboot and back.
      let control = Control::open()?;
      let mut haptics = cfg.haptics.as_ref().map(Haptics::open).transpose()?;
-@@ -1105,6 +1107,13 @@
+@@ -1105,6 +1108,13 @@
      // and the users whose own files are still closed once it is open.
      let mut decryptor: Option<Decryptor> = None;
      let mut closed: Vec<Closed> = Vec::new();
@@ -245,7 +255,22 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
      let mut arriving = Some(Incoming::Arrived);
      // The mount page shows the partitions as they are when it opens and
      // after each change; why they cannot be read is the page's to say.
-@@ -1374,6 +1383,17 @@
+@@ -1355,6 +1365,14 @@
+         None => None,
+     };
+     let mut scanned_at = Instant::now();
++    // The WLAN kept: whether it opens as the recovery starts, and the network
++    // it joins by itself with the password that worked.
++    let (wlan_auto, mut wlan_saved) = wlanmem::read();
++    app.state.wlan_auto = wlan_auto;
++    let mut wlan_opened = false;
++    let mut wlan_joined = false;
++    let mut wlan_password: Option<String> = None;
++    let mut wlan_kept = false;
+     app.state.update_server = cfg.update.is_some();
+     // Asking the update server, and downloading the full package.
+     let mut checker: Option<updates::Worker> = None;
+@@ -1374,6 +1392,17 @@
      let mut drive_at = Instant::now();
      loop {
          let now = monotonic_ms();
@@ -263,7 +288,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
          if leave_at.is_some_and(|at| now >= at) {
              leave_at = None;
              power(leave)?;
-@@ -1383,8 +1403,17 @@
+@@ -1383,8 +1412,17 @@
              if !inputs.has_panel() {
                  skyward_sys::kmsg("no touch panel came up; the pages are worked with the keys")?;
                  app.touchscreen_missing();
@@ -281,7 +306,67 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
          for fx in app.tick(now) {
              match fx {
                  Effect::Haptic => {
-@@ -2035,6 +2064,20 @@
+@@ -1913,6 +1951,59 @@
+                 app.set_traffic(t);
+             }
+         }
++        // The WLAN kept is opened once the phone's own parts are up, and
++        // joined as soon as its network shows.
++        if app.state.wlan_auto && !wlan_joined {
++            if let Some(saved) = wlan_saved.clone() {
++                let power = app.state.wlan.as_ref().map(|w| w.power.clone());
++                if crate::prepared() && !wlan_opened && matches!(power, Some(WlanPower::Off | WlanPower::Failed(_))) {
++                    wlan_opened = true;
++                    wlan_worker(&wlan)?.send(wlan::Command::On);
++                    skyward_sys::kmsg("the WLAN is opened for the network kept")?;
++                }
++                let found = app.state.wlan.as_ref().and_then(|w| w.networks.iter().find(|n| n.ssid == saved.ssid)).cloned();
++                if matches!(power, Some(WlanPower::On)) {
++                    if let Some(found) = found {
++                        wlan_joined = true;
++                        wlan_password = Some(saved.password.clone());
++                        skyward_sys::kmsg(&format!("joining the network kept: {}", found.name))?;
++                        wlan_worker(&wlan)?.send(wlan::Command::Join {
++                            ssid: found.ssid,
++                            name: found.name,
++                            security: found.security,
++                            password: saved.password,
++                        });
++                    }
++                }
++            }
++        }
++        // A network joined with a password the recovery has: kept for the
++        // starts that follow, or forgotten where the access point refused it.
++        if app.state.wlan_auto && !wlan_kept {
++            if let Some(joined) = app.state.wlan.as_ref().and_then(|w| w.joined.as_ref()) {
++                match &joined.stage {
++                    Joining::Connected(_) => {
++                        if let Some(password) = &wlan_password {
++                            match wlanmem::save(&joined.ssid, password) {
++                                Ok(()) => {
++                                    wlan_kept = true;
++                                    skyward_sys::kmsg(&format!("the network {} is kept for the starts that follow", joined.name))?;
++                                }
++                                Err(e) => skyward_sys::kmsg(&format!("the network was not kept: {e:#}"))?,
++                            }
++                        }
++                    }
++                    Joining::WrongPassword => {
++                        wlan_kept = true;
++                        wlan_saved = None;
++                        wlan_password = None;
++                        let _ = wlanmem::forget_network();
++                        skyward_sys::kmsg("the password kept was refused; the WLAN stays on and the network is forgotten")?;
++                    }
++                    _ => {}
++                }
++            }
++        }
+         // The WLAN page scans again now and then while it shows, as the
+         // stock settings do.
+         let wlan_on = app.state.wlan.as_ref().is_some_and(|w| w.power == WlanPower::On);
+@@ -2035,6 +2126,20 @@
                      }
                      closed = opening.closed;
                      show_closed(&mut app, &closed)?;
@@ -302,7 +387,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
                  }
                  decrypt::Ended::Opened(Err(why)) => {
                      skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
-@@ -2051,11 +2094,42 @@
+@@ -2051,11 +2156,42 @@
                      app.data_failed(why);
                  }
                  decrypt::Ended::Unlocked(Ok(still)) => {
@@ -345,7 +430,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
                      app.unlock_failed(why, now);
                  }
              }
-@@ -2295,13 +2369,28 @@
+@@ -2295,13 +2431,28 @@
                      // under way, and takes nothing more until it is done.
                      Effect::OpenData => {
                          ensure!(decryptor.is_none(), "the data partition is being opened already");
@@ -375,9 +460,173 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
                      Effect::ReadDir(folder) => list(&mut app, folder)?,
                      Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,
                      // A name taken where an entry goes is the user's to
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-crypto/src/data.rs
---- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
+@@ -2465,11 +2616,24 @@
+                         merger = Some(merge::Merger::start(slot, true)?);
+                     }
+                     Effect::Wlan(on) => wlan_worker(&wlan)?.send(if on { wlan::Command::On } else { wlan::Command::Off }),
++                    Effect::WlanAuto(on) => {
++                        if on {
++                            wlanmem::set_auto()?;
++                            skyward_sys::kmsg("the WLAN is kept for the starts that follow")?;
++                        } else {
++                            wlanmem::forget()?;
++                            wlan_saved = None;
++                            skyward_sys::kmsg("the WLAN kept is forgotten")?;
++                        }
++                    }
+                     Effect::ScanWlan => {
+                         scanned_at = Instant::now();
+                         wlan_worker(&wlan)?.send(wlan::Command::Scan);
+                     }
+                     Effect::JoinWlan { ssid, name, security, password } => {
++                        wlan_joined = true;
++                        wlan_kept = false;
++                        wlan_password = Some(password.0.clone());
+                         wlan_worker(&wlan)?.send(wlan::Command::Join { ssid, name, security, password: password.0 })
+                     }
+                     Effect::LeaveWlan => wlan_worker(&wlan)?.send(wlan::Command::Leave),
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/wlanmem.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/wlanmem.rs
+--- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/wlanmem.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/wlanmem.rs	2026-11-10 23:58:38.321860709 +0000
+@@ -0,0 +1,135 @@
++//! The WLAN a user chose to have kept: whether the setting is on, and the
++//! network joined last with the password it took, so that the recovery opens
++//! the WLAN as it starts and joins that network by itself.
++//!
++//! Kept beside the recovery's own settings, readable by root alone. Turning
++//! the setting off takes it away, and so does a factory reset.
++
++use anyhow::{Context, Result};
++use std::os::unix::fs::PermissionsExt;
++use std::path::Path;
++
++/// The partition the file is on, made writable for as long as a write takes.
++const METADATA: &str = "/metadata";
++
++/// Where it is kept: beside the recovery's own settings.
++pub const FILE: &str = "/metadata/skyward/wlan";
++
++/// A network kept, with the password it was joined with.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct Saved {
++    pub ssid: Vec<u8>,
++    pub password: String,
++}
++
++/// Whether the setting is on, and the network it keeps where one is kept.
++pub fn read() -> (bool, Option<Saved>) {
++    let text = match std::fs::read_to_string(FILE) {
++        Ok(text) => text,
++        Err(_) => return (false, None),
++    };
++    let mut auto = false;
++    let (mut ssid, mut password) = (None, None);
++    for line in text.lines() {
++        let Some((key, value)) = line.split_once('=') else {
++            continue;
++        };
++        match key.trim() {
++            "auto" => auto = value.trim() == "1",
++            "ssid" => ssid = unhex(value.trim()),
++            "password" => password = Some(value.to_string()),
++            _ => {}
++        }
++    }
++    let saved = match (ssid, password) {
++        (Some(ssid), Some(password)) if !ssid.is_empty() && !password.is_empty() => Some(Saved { ssid, password }),
++        _ => None,
++    };
++    (auto, saved)
++}
++
++/// Do `work` with the partition writable, and read-only again afterwards.
++fn writable<T>(work: impl FnOnce() -> Result<T>) -> Result<T> {
++    let at = Path::new(METADATA);
++    let mounted = skyward_block::mount::is_mount_point(at)?;
++    if mounted {
++        skyward_block::mount::remount_writable(at, true).context("make /metadata writable")?;
++    }
++    let done = work();
++    if mounted {
++        let _ = skyward_block::mount::remount_writable(at, false);
++    }
++    done
++}
++
++fn store(text: &str) -> Result<()> {
++    writable(|| {
++        let at = Path::new(FILE);
++        if let Some(dir) = at.parent() {
++            std::fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
++        }
++        std::fs::write(at, text).with_context(|| format!("write {}", at.display()))?;
++        std::fs::set_permissions(at, std::fs::Permissions::from_mode(0o600))
++            .with_context(|| format!("keep {} to root alone", at.display()))?;
++        Ok(())
++    })
++}
++
++/// Keep the setting on with nothing to join yet.
++pub fn set_auto() -> Result<()> {
++    store("auto=1\n")
++}
++
++/// Keep `ssid` and the password it was joined with.
++pub fn save(ssid: &[u8], password: &str) -> Result<()> {
++    store(&format!("auto=1\nssid={}\npassword={password}\n", hex(ssid)))
++}
++
++/// Keep the setting on but forget the network, as after a password the access
++/// point refused.
++pub fn forget_network() -> Result<()> {
++    store("auto=1\n")
++}
++
++/// Take the setting and the network away.
++pub fn forget() -> Result<()> {
++    writable(|| match std::fs::remove_file(FILE) {
++        Ok(()) => Ok(()),
++        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
++        Err(e) => Err(e).with_context(|| format!("remove {FILE}")),
++    })
++}
++
++fn hex(bytes: &[u8]) -> String {
++    bytes.iter().map(|b| format!("{b:02x}")).collect()
++}
++
++fn unhex(text: &str) -> Option<Vec<u8>> {
++    if text.len() % 2 != 0 {
++        return None;
++    }
++    (0..text.len())
++        .step_by(2)
++        .map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok())
++        .collect()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn a_name_goes_round_the_file_as_bytes() {
++        assert_eq!(unhex(&hex("Skyward客厅".as_bytes())).as_deref(), Some("Skyward客厅".as_bytes()));
++    }
++
++    #[test]
++    fn a_password_keeps_what_it_holds() {
++        assert_eq!(unhex(&hex(b"pa ss=word")), Some(b"pa ss=word".to_vec()));
++    }
++
++    #[test]
++    fn half_a_byte_is_no_name() {
++        assert_eq!(unhex("abc"), None);
++    }
++}
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-crypto/src/data.rs
+--- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
 @@ -32,6 +32,12 @@
  /// The phone's owner, the first of its users.
  const OWNER: u32 = 0;
@@ -443,9 +692,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
          lock,
      })
  }
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-modules/src/lib.rs
---- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-10 15:01:41.143999884 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-modules/src/lib.rs
+--- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-10 15:01:41.143999884 +0000
 @@ -25,6 +25,10 @@
  /// loaded. Returns the files loaded, dependencies first.
  pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
@@ -467,10 +716,19 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
              insmod(&path, "")?;
              loaded.push(path);
          }
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-ui/src/app.rs
---- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-10 15:02:23.523999868 +0000
-@@ -1169,6 +1169,8 @@
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-ui/src/app.rs
+--- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-10 23:58:59.885860701 +0000
+@@ -557,6 +557,8 @@
+     /// over.
+     KeepRecovery,
+     Wlan,
++    /// Open the WLAN as the recovery starts and join the network kept.
++    WlanAuto,
+     /// Show the password typed rather than a dot for each character.
+     ShowPassword,
+ }
+@@ -1169,6 +1171,8 @@
      Skip,
      /// Try opening the data partition again, after it did not open.
      OpenData,
@@ -479,7 +737,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
      Back,
      Theme { dark: bool },
      Toggle(Switch),
-@@ -1671,6 +1673,12 @@
+@@ -1671,6 +1675,15 @@
      /// lock its users' own files wait on.
      pub data: Data,
      pub code: String,
@@ -489,19 +747,23 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
 +    /// Whether the phone's own partitions and services are up. Until they
 +    /// are, the data page says it waits for them.
 +    pub prepared: bool,
++    /// Whether the WLAN is opened as the recovery starts, joining the network
++    /// whose password is kept beside the recovery's own settings.
++    pub wlan_auto: bool,
      /// What is typed in the search field.
      pub search: String,
      /// The on-screen keyboard's layer.
-@@ -1799,6 +1807,8 @@
+@@ -1799,6 +1812,9 @@
              system_notice: None,
              data: Data::Closed,
              code: String::new(),
 +            remember: false,
 +            prepared: false,
++            wlan_auto: false,
              search: String::new(),
              layer: Layer::Letters,
              held: None,
-@@ -2011,6 +2021,8 @@
+@@ -2011,6 +2027,8 @@
      /// knows, telling what waits with [`App::data_waiting`] or why it did
      /// not open with [`App::data_failed`].
      OpenData,
@@ -510,7 +772,16 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
      /// Open the own files of `user` with what they entered at their screen
      /// lock, telling what still waits with [`App::data_waiting`] or why it
      /// did not open with [`App::unlock_failed`].
-@@ -5137,6 +5149,11 @@
+@@ -2103,6 +2121,8 @@
+     /// Turn the WLAN on or off; how it stands comes back with
+     /// [`App::set_wlan`].
+     Wlan(bool),
++    /// Keep the setting, and the network joined with it, or take both away.
++    WlanAuto(bool),
+     ScanWlan,
+     JoinWlan { ssid: Vec<u8>, name: String, security: Security, password: Secret },
+     LeaveWlan,
+@@ -5137,6 +5157,11 @@
                  return self.arrive_at(s);
              }
              Action::OpenData => return self.open_data(),
@@ -522,7 +793,30 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
              Action::Skip => {
                  self.leave(true);
                  if self.stack.len() > 1 {
-@@ -6274,6 +6291,32 @@
+@@ -5163,6 +5188,14 @@
+                 self.refresh();
+                 return vec![Effect::Wlan(on)];
+             }
++            // The setting lives in its file: on keeps the network joined
++            // next time, off takes the password away with it.
++            Action::Toggle(Switch::WlanAuto) => {
++                self.state.wlan_auto = !self.state.wlan_auto;
++                let on = self.state.wlan_auto;
++                self.refresh();
++                return vec![Effect::WlanAuto(on)];
++            }
+             Action::Toggle(switch) => {
+                 let on = match switch {
+                     Switch::Vibrate => &mut self.state.vibrate,
+@@ -5173,6 +5206,7 @@
+                     Switch::KeepRecovery => &mut self.state.keep_recovery,
+                     Switch::ShowPassword => &mut self.state.show_password,
+                     Switch::Wlan => unreachable!("the WLAN switch is turned above"),
++                    Switch::WlanAuto => unreachable!("the WLAN setting is turned above"),
+                 };
+                 *on = !*on;
+                 let now_on = *on;
+@@ -6274,6 +6308,32 @@
          self.dirty = true;
      }
  
@@ -555,10 +849,18 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
      /// A button went down. With the keys working the page, the volume keys
      /// move the light from control to control and the power key works the
      /// one lit as it comes back up; otherwise the first volume press lights
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-ui/src/pages.rs
---- /tmp/tmp.LLdeyfCElx/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.PAqxp953xv/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-10 23:43:34.313999958 +0000
-@@ -286,6 +286,7 @@
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-ui/src/pages.rs
+--- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-10 23:59:18.413860694 +0000
+@@ -160,6 +160,7 @@
+ const WLAN: Text = ["WLAN", "Wi-Fi", "Wi-Fi"];
+ const DECRYPT: Text = ["解密", "解密", "Decrypt"];
+ const ADVANCED: Text = ["高级", "進階", "Advanced"];
++const WLAN_AUTO: Text = ["WiFi 自动连接", "WiFi 自動連線", "WLAN on at start"];
+ const SETTINGS: Text = ["设置", "設定", "Settings"];
+ const REBOOT: Text = ["重启", "重新啟動", "Reboot"];
+ const ABOUT: Text = ["关于本机", "關於手機", "About phone"];
+@@ -286,6 +287,7 @@
          y = first.bottom + t.m.card_gap;
      }
      let tools = widgets::list(&mut c, t, f, y, &[
@@ -566,7 +868,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
          Row::new(l.pick(["安装", "安裝", "Install"])).icon(GREEN, Icon::Install),
          Row::new(l.pick(["备份", "備份", "Backup"])).icon(BLUE, Icon::Backup),
          Row::new(l.pick(["恢复", "還原", "Restore"])).icon(PURPLE, Icon::Restore),
-@@ -293,6 +294,7 @@
+@@ -293,6 +295,7 @@
          Row::new(l.pick(DECRYPT)).icon(BLUE, Icon::Lock).trail(Trail::Value(fmt::data(l, &cx.state.data))),
      ]);
      out.extend(hits(&tools.rows, &[
@@ -574,7 +876,23 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
          Action::Open(Screen::Install),
          Action::Open(Screen::Backup),
          Action::Open(Screen::Restore),
-@@ -687,14 +689,27 @@
+@@ -385,6 +388,15 @@
+         "When on, a computer can manage the files in internal storage, once it is decrypted.",
+     ]);
+     y = widgets::footnote(&mut c, t, f, usb.bottom, note);
++    y = widgets::section(&mut c, t, f, y, "WiFi");
++    let wlan = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(WLAN_AUTO)).icon(BLUE, Icon::Wlan).trail(Trail::Switch(s.wlan_auto))]);
++    out.extend(hits(&wlan.rows, &[Action::Toggle(Switch::WlanAuto)]));
++    let note = l.pick([
++        "开启后，recovery 启动时自动打开 WiFi，并用记住的密码连上上次的网络；关掉会忘记密码。",
++        "開啟後，recovery 啟動時自動開啟 WiFi，並用記住的密碼連上上次的網路；關掉會忘記密碼。",
++        "When on, the recovery opens the WLAN as it starts and joins the last network with the password it kept; turning it off forgets the password.",
++    ]);
++    y = widgets::footnote(&mut c, t, f, wlan.bottom, note);
+     y = widgets::section(&mut c, t, f, y, l.pick(["调试", "偵錯", "Debugging"]));
+     let debug = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(TERMINAL)).icon(SLATE, Icon::Terminal)]);
+     out.extend(hits(&debug.rows, &[Action::Open(Screen::Terminal)]));
+@@ -687,14 +699,27 @@
      let (c, l) = (page(cx), cx.state.lang);
      match &cx.state.data {
          Data::Locked { user, keys, checking } => code(cx, c, *user, *keys, *checking),
@@ -610,7 +928,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.LLdeyfCElx/skyward-0.2.0/
          Data::Open => data_status(
              cx,
              c,
-@@ -798,6 +813,15 @@
+@@ -798,6 +823,15 @@
      if keys != Keys::Pattern {
          widgets::code_dots(&mut c, t, x, bottom - m.dp(92.0), s.code.chars().count());
      }
