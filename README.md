@@ -39,7 +39,7 @@
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 b
-fastboot flash recovery_b skyward-pudding-20261111-v27-OS4.0.6.0.XPCCNXM.img
+fastboot flash recovery_b skyward-pudding-20261111-v0.2.27-OS4.0.6.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进，别用 fastboot reboot recovery
 ```
@@ -51,8 +51,8 @@ adb reboot recovery                          # 从系统进，别用 fastboot re
 ## 校验
 
 ```
-sha256  e473bd1dc5b696d2b99ea782b854bf04ed98ef14906fcfc33a2d6960bd283ea1
-zip     skyward-v27-pudding-OS4.0.6.0.XPCCNXM.zip（更新器用，sha256 173a13851069e994c2c66dfcb8b6fbb0be5b38e2cba38b641a71032ff10ba393）
+sha256  ba13532dead659720d6d07b99da713eff12d59dbb152a67a3ea814d81143714a
+zip     skyward-v0.2.27-pudding-OS4.0.6.0.XPCCNXM.zip（更新器用，sha256 ab130f58fd6afa66210a02b52aef0904f4f7ce116f6bcbea54ef0b5495098f05）
 大小    104857600
 ```
 
@@ -65,7 +65,7 @@ tar xzf skyward.tar.gz
 cd skyward-0.2.0
 
 # 2) 打本仓库的补丁
-patch -p1 < ../patches/skyward-pudding-v27.patch
+patch -p1 < ../patches/skyward-pudding-v0.2.27.patch
 
 # 3) 交叉编译（宿主 aarch64 也能编，见 docs/开发记录.md 的“两个坑”）
 rustup target add aarch64-linux-android
@@ -83,7 +83,7 @@ python3 scripts/avbwrap.py ramdisk.lz4 out.img
 
 - 地址写在 `device.toml` 的 `[update] skyward`，指向 `docs/update.json`（走 `gh-proxy.com` 镜像）
 - 本机实测下载速度：直连 `github.com` 71 KB/s、`ghfast.top` 500 KB/s、`ghproxy.net` 335 KB/s、**`gh-proxy.com` 1.5 MB/s**，取最快的
-- Release 里的 `skyward-v27-pudding-OS4.0.6.0.XPCCNXM.zip`（只含一个 `.img`）就是更新器要的格式；`docs/update.json` 里的 `digest` 与 `size` 必须和它一致
+- Release 里的 `skyward-v0.2.27-pudding-OS4.0.6.0.XPCCNXM.zip`（只含一个 `.img`）就是更新器要的格式；`docs/update.json` 里的 `digest` 与 `size` 必须和它一致
 - 发新版时：传 zip → 改 `docs/update.json` 的 `tag_name`/`size`/`digest`/URL → 提交。镜像不行就换 `[update] skyward` 的地址，不用重新编译
 
 ## 上游更新了怎么办
@@ -97,6 +97,10 @@ RAMDISK=/path/to/ramdisk scripts/update-upstream.sh v0.3.0
 ```
 
 补丁冲突的文件清单与手工合并办法见 `docs/开发记录.md` 第 11 节。
+
+## 版本号的写法
+
+从 `v0.2.27` 起用**三段式**（与上游 `kirklin/skyward` 一致）：semver 要 `主.次.修订`，纯数字 tag 会让更新检查解析失败。早先的 `v25`/`v26`/`v27` 是纯数字，解析器现在也容错，但新版本一律三段式。
 
 ## 文件名里的版本
 
