@@ -38,7 +38,12 @@ jobs:
           targets: aarch64-linux-android
 
       - name: Android NDK
-        uses: android-actions/setup-android@v3
+        run: |
+          set -e
+          curl -fL --retry 3 -o "$RUNNER_TEMP/ndk.zip" \
+            https://dl.google.com/android/repository/android-ndk-r29-linux.zip
+          unzip -q "$RUNNER_TEMP/ndk.zip" -d "$RUNNER_TEMP"
+          echo "ANDROID_NDK_HOME=$RUNNER_TEMP/android-ndk-r29" >> "$GITHUB_ENV"
 
       - name: 取上游源码并打补丁
         run: |
@@ -55,7 +60,7 @@ jobs:
       - name: 交叉编译
         run: |
           set -e
-          NDK="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/$(ls "$ANDROID_HOME/ndk" | tail -1)}"
+          NDK="$ANDROID_NDK_HOME"
           SYSROOT="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           BUILTINS=$(dirname "$(find "$NDK/toolchains/llvm/prebuilt/linux-x86_64/lib/clang" \
             -name 'libclang_rt.builtins-aarch64-android.a' | head -1)")
