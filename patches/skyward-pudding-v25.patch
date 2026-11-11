@@ -1,6 +1,6 @@
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/main.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-11 01:48:54.992999940 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/main.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-11 01:48:54.992999940 +0000
 @@ -26,6 +26,8 @@
  #[cfg(target_os = "android")]
  mod relabel;
@@ -164,9 +164,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/
  /// Map and mount the slot's partitions from super, then bring up what runs
  /// from them. Recovery has to stay usable when super cannot be mounted, as
  /// after it is wiped, so the reason goes to the kernel log instead.
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/remember.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/remember.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
 @@ -0,0 +1,60 @@
 +//! The screen lock a user chose to have kept, so that the data partition
 +//! opens as the recovery starts rather than waiting for it to be typed.
@@ -228,9 +228,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/
 +        Err(e) => Err(e).with_context(|| format!("remove {FILE}")),
 +    })
 +}
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/ui.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-11 01:41:27.680999943 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/ui.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-11 02:35:25.912999002 +0000
 @@ -3,6 +3,8 @@
  use crate::filework;
  use crate::haptics::Haptics;
@@ -547,9 +547,48 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/
                          wlan_worker(&wlan)?.send(wlan::Command::Join { ssid, name, security, password: password.0 })
                      }
                      Effect::LeaveWlan => wlan_worker(&wlan)?.send(wlan::Command::Leave),
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/wlan.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/wlan.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-11 01:48:54.992999940 +0000
+@@ -2502,7 +2701,8 @@
+                     Effect::CheckSkyward => {
+                         ensure!(skyward_checker.is_none(), "GitHub is being asked already");
+                         let probe = cfg.wlan.as_ref().context("the phone's WLAN is not brought up")?.probe.clone();
+-                        let task = updates::Task::CheckSkyward { probe, codename: cfg.device.codename.clone() };
++                        let at = cfg.update.as_ref().and_then(|u| u.skyward.clone()).unwrap_or_else(|| skyward_net::github::LATEST.to_string());
++                        let task = updates::Task::CheckSkyward { probe, codename: cfg.device.codename.clone(), at };
+                         skyward_checker = Some(updates::Worker::start(task, servers.clone())?);
+                     }
+                     // The zip goes into the recovery's own folder, which is
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/updates.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/updates.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/updates.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/updates.rs	2026-11-11 02:42:24.256998843 +0000
+@@ -42,7 +42,7 @@
+     /// Ask GitHub for Skyward's newest release and its zip for the phone
+     /// `codename` names; where that fails, `probe` says whether the network
+     /// is why.
+-    CheckSkyward { probe: String, codename: String },
++    CheckSkyward { probe: String, codename: String, at: String },
+     /// Download `build` to `path`, check that its image is Skyward for the
+     /// phone `codename` names, and write the image into the recovery
+     /// partitions of the slot that starts next and of any other slot that
+@@ -148,10 +148,14 @@
+                         let end = fetch(&servers, release.urls.clone(), &sum, &release.name, &path, &stopping, &using, &tell, &mut refused);
+                         tell(Event::Ended(end));
+                     }
+-                    Task::CheckSkyward { probe, codename } => {
++                    Task::CheckSkyward { probe, codename, at } => {
+                         let a = http::agent(servers.clone());
+                         *using.lock().expect("the agent is not held by a thread that panicked") = Some(a.clone());
+-                        let answer = github::ask(&a, &codename, skyward_info::VERSION).map_err(|e| unanswered(&e, github::LATEST, &probe, &servers));
++                        let running = match skyward_info::RELEASE {
++                            "" => skyward_info::VERSION,
++                            release => release,
++                        };
++                        let answer = github::ask(&a, &at, &codename, running).map_err(|e| unanswered(&e, &at, &probe, &servers));
+                         tell(Event::SkywardChecked(answer));
+                     }
+                     // GitHub's API hands the zip out at a short-lived address
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/wlan.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/wlan.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-11 01:48:54.992999940 +0000
 @@ -55,8 +55,10 @@
  /// goes.
  const TRAFFIC: Duration = Duration::from_secs(1);
@@ -621,9 +660,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/
  }
  
  /// Put a file the driver asks for where the firmware loader looks.
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/wlanmem.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/wlanmem.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward/src/wlanmem.rs	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward/src/wlanmem.rs	2026-11-11 01:40:17.408999970 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/wlanmem.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/wlanmem.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward/src/wlanmem.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward/src/wlanmem.rs	2026-11-11 01:40:17.408999970 +0000
 @@ -0,0 +1,183 @@
 +//! The WLAN a user chose to have kept: whether it is opened as the recovery
 +//! starts, whether the password of the network joined last is kept, and that
@@ -808,9 +847,24 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/
 +        assert_eq!(render(&kept), "auto=1\nkeep=0\n");
 +    }
 +}
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-crypto/src/data.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-config/src/lib.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-config/src/lib.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-config/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-config/src/lib.rs	2026-11-11 02:35:25.908999002 +0000
+@@ -169,6 +169,11 @@
+ pub struct Update {
+     /// Where the questions are sent.
+     pub server: String,
++    /// Where Skyward's newest build is told of, where this build names one:
++    /// a release's JSON as GitHub answers with, possibly through a mirror.
++    /// Without it, the upstream project's own newest release is asked for.
++    #[serde(default)]
++    pub skyward: Option<String>,
+ }
+ 
+ /// What a backup takes in and leaves out beyond what every Android phone
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-crypto/src/data.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
 @@ -32,6 +32,12 @@
  /// The phone's owner, the first of its users.
  const OWNER: u32 = 0;
@@ -876,9 +930,27 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/
          lock,
      })
  }
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-modules/src/lib.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-11 01:54:42.552999934 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-info/src/lib.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-info/src/lib.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-info/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-info/src/lib.rs	2026-11-11 02:42:24.256998843 +0000
+@@ -13,6 +13,14 @@
+ /// Version of this build, shown on the About page.
+ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+ 
++/// The release this build was made for, where the build named one: the tag of
++/// the release it is meant to be, so that asking for the newest build knows
++/// whether this one is already it. A build that names none asks by `VERSION`.
++pub const RELEASE: &str = match option_env!("SKYWARD_RELEASE") {
++    Some(tag) => tag,
++    None => "",
++};
++
+ const CPU: &str = "/sys/devices/system/cpu";
+ const POWER_SUPPLY: &str = "/sys/class/power_supply";
+ const SYS_BLOCK: &str = "/sys/class/block";
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-modules/src/lib.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-11 01:54:42.552999934 +0000
 @@ -25,6 +25,12 @@
  /// loaded. Returns the files loaded, dependencies first.
  pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
@@ -932,9 +1004,33 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/
  /// A `modules.dep` graph: each module file mapped to the module files it
  /// depends on. Keys and values are reduced to bare file names so the graph is
  /// independent of where the modules were sourced from (GKI devices keep them
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-net/src/iface.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-net/src/iface.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-net/src/iface.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-net/src/iface.rs	2026-11-11 01:33:35.460999970 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-net/src/github.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-net/src/github.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-net/src/github.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-net/src/github.rs	2026-11-11 02:35:25.912999002 +0000
+@@ -94,16 +94,16 @@
+ 
+ /// Ask GitHub for Skyward's newest release, and its zip for the phone
+ /// `codename` names, as the build of version `running`.
+-pub fn ask(agent: &ureq::Agent, codename: &str, running: &str) -> Result<Newest> {
++pub fn ask(agent: &ureq::Agent, at: &str, codename: &str, running: &str) -> Result<Newest> {
+     let mut response = agent
+-        .get(LATEST)
++        .get(at)
+         .header("Accept", "application/vnd.github+json")
+         .header("X-GitHub-Api-Version", API_VERSION)
+         .header("User-Agent", format!("Skyward/{running}"))
+         .call()
+-        .with_context(|| format!("ask {LATEST}"))?;
++        .with_context(|| format!("ask {at}"))?;
+     let status = response.status();
+-    let body = response.body_mut().read_to_string().with_context(|| format!("read the answer of {LATEST}"))?;
++    let body = response.body_mut().read_to_string().with_context(|| format!("read the answer of {at}"))?;
+     if !status.is_success() {
+         bail!(refusal(status, &body));
+     }
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-net/src/iface.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-net/src/iface.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-net/src/iface.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-net/src/iface.rs	2026-11-11 01:33:35.460999970 +0000
 @@ -76,6 +76,13 @@
      Ok(mac)
  }
@@ -949,9 +1045,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/
  /// Bring the interface up, or take it down.
  pub fn set_up(interface: &str, up: bool) -> Result<()> {
      let fd = socket()?;
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-ui/src/app.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-11 01:40:25.940999966 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-ui/src/app.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-11 01:40:25.940999966 +0000
 @@ -557,6 +557,10 @@
      /// over.
      KeepRecovery,
@@ -1097,9 +1193,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/
      /// A button went down. With the keys working the page, the volume keys
      /// move the light from control to control and the power key works the
      /// one lit as it comes back up; otherwise the first volume press lights
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-ui/src/pages.rs
---- /tmp/tmp.Nan3ARdFH2/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.B9Ya5wxT5b/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-11 01:40:34.612999963 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-ui/src/pages.rs
+--- /tmp/tmp.h534bbQVLS/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.9Mm929Fmfg/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-11 01:40:34.612999963 +0000
 @@ -160,6 +160,8 @@
  const WLAN: Text = ["WLAN", "Wi-Fi", "Wi-Fi"];
  const DECRYPT: Text = ["解密", "解密", "Decrypt"];

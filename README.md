@@ -39,7 +39,7 @@
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 b
-fastboot flash recovery_b skyward-pudding-20261111-v24-OS4.0.4.0.XPCCNXM.img
+fastboot flash recovery_b skyward-pudding-20261111-v25-OS4.0.4.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进，别用 fastboot reboot recovery
 ```
@@ -51,8 +51,8 @@ adb reboot recovery                          # 从系统进，别用 fastboot re
 ## 校验
 
 ```
-sha256  cad8673aabe266101f46a6cfed4225d8e32def3ddae487f35e0377195dedb420
-md5     3dd4f13fcc2498a5c60f05fb8bf6c163
+sha256  b9c370b9857f3349662bf17f79cec26d31f93822fb9272f5fe7bad3ecd2ff7c3
+zip     skyward-v25-pudding-OS4.0.4.0.XPCCNXM.zip（更新器用，sha256 7ae312c624862fd7caafd5e6d12f4287de1e5819fd25482b11c9af85ad19ba57）
 大小    104857600
 ```
 
@@ -65,7 +65,7 @@ tar xzf skyward.tar.gz
 cd skyward-0.2.0
 
 # 2) 打本仓库的补丁
-patch -p1 < ../patches/skyward-pudding-v24.patch
+patch -p1 < ../patches/skyward-pudding-v25.patch
 
 # 3) 交叉编译（宿主 aarch64 也能编，见 docs/开发记录.md 的“两个坑”）
 rustup target add aarch64-linux-android
@@ -76,6 +76,15 @@ python3 scripts/avbwrap.py ramdisk.lz4 out.img
 ```
 
 `scripts/avbwrap.py` 的用法：把新 ramdisk 打包成 boot v4 镜像，并按原厂布局补 AVB 头与尾（自检能把原包逐字节重建）。
+
+## recovery 里的「检查更新」
+
+这一版起，REC 里的「设置 → 关于 → 检查更新」问的是**本仓库**，不是上游：
+
+- 地址写在 `device.toml` 的 `[update] skyward`，指向 `docs/update.json`（走 `gh-proxy.com` 镜像）
+- 本机实测下载速度：直连 `github.com` 71 KB/s、`ghfast.top` 500 KB/s、`ghproxy.net` 335 KB/s、**`gh-proxy.com` 1.5 MB/s**，取最快的
+- Release 里的 `skyward-v25-pudding-OS4.0.4.0.XPCCNXM.zip`（只含一个 `.img`）就是更新器要的格式；`docs/update.json` 里的 `digest` 与 `size` 必须和它一致
+- 发新版时：传 zip → 改 `docs/update.json` 的 `tag_name`/`size`/`digest`/URL → 提交。镜像不行就换 `[update] skyward` 的地址，不用重新编译
 
 ## 上游更新了怎么办
 
