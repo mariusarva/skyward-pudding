@@ -13,6 +13,12 @@
 #   AR_aarch64_linux_android=ar
 set -eu
 
+# 时间戳对齐：本机是 Asia/Shanghai，而 Linux 环境默认 UTC。若不设这个，从这里
+# 往 /storage 拷文件，FUSE 会把 mtime 写早 8 小时（2026-11-11 踩过：镜像显示 02:44，
+# 实际是 10:44）。设上 TZ 后 copy 出来的 mtime 就是对的。
+export TZ=Asia/Shanghai
+
+
 TAG="${1:-}"
 if [ -z "$TAG" ]; then
   echo "用法：RAMDISK=/path/to/ramdisk $0 <上游 tag，如 v0.3.0>" >&2
