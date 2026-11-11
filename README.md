@@ -1,6 +1,6 @@
 # Skyward for Xiaomi 17 (pudding)
 
-小米 17（`pudding`，OS4.0.4.0.XPCCNXM）可用的 Skyward recovery：**双系统 + data 解密**都能用。
+小米 17（`pudding`，本机系统 OS4.0.6.0.XPCCNXM）可用的 Skyward recovery：**双系统 + data 解密**都能用。
 
 基于 [kirklin/skyward](https://github.com/kirklin/skyward) v0.2.0（GPL-3.0）自编译，发布公告文案见 `docs/发布公告.md`。
 
@@ -39,7 +39,7 @@
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 b
-fastboot flash recovery_b skyward-pudding-20261111-v25-OS4.0.4.0.XPCCNXM.img
+fastboot flash recovery_b skyward-pudding-20261111-v25-OS4.0.6.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进，别用 fastboot reboot recovery
 ```
@@ -52,7 +52,7 @@ adb reboot recovery                          # 从系统进，别用 fastboot re
 
 ```
 sha256  b9c370b9857f3349662bf17f79cec26d31f93822fb9272f5fe7bad3ecd2ff7c3
-zip     skyward-v25-pudding-OS4.0.4.0.XPCCNXM.zip（更新器用，sha256 7ae312c624862fd7caafd5e6d12f4287de1e5819fd25482b11c9af85ad19ba57）
+zip     skyward-v25-pudding-OS4.0.6.0.XPCCNXM.zip（更新器用，sha256 2676edf591d2a38990ccad09a18bf13e73417e400f9e497b5fba827f2521077a）
 大小    104857600
 ```
 
@@ -83,7 +83,7 @@ python3 scripts/avbwrap.py ramdisk.lz4 out.img
 
 - 地址写在 `device.toml` 的 `[update] skyward`，指向 `docs/update.json`（走 `gh-proxy.com` 镜像）
 - 本机实测下载速度：直连 `github.com` 71 KB/s、`ghfast.top` 500 KB/s、`ghproxy.net` 335 KB/s、**`gh-proxy.com` 1.5 MB/s**，取最快的
-- Release 里的 `skyward-v25-pudding-OS4.0.4.0.XPCCNXM.zip`（只含一个 `.img`）就是更新器要的格式；`docs/update.json` 里的 `digest` 与 `size` 必须和它一致
+- Release 里的 `skyward-v25-pudding-OS4.0.6.0.XPCCNXM.zip`（只含一个 `.img`）就是更新器要的格式；`docs/update.json` 里的 `digest` 与 `size` 必须和它一致
 - 发新版时：传 zip → 改 `docs/update.json` 的 `tag_name`/`size`/`digest`/URL → 提交。镜像不行就换 `[update] skyward` 的地址，不用重新编译
 
 ## 上游更新了怎么办
@@ -97,6 +97,10 @@ RAMDISK=/path/to/ramdisk scripts/update-upstream.sh v0.3.0
 ```
 
 补丁冲突的文件清单与手工合并办法见 `docs/开发记录.md` 第 11 节。
+
+## 文件名里的版本
+
+文件名用**本机运行的系统版本**（OS4.0.6.0.XPCCNXM）。recovery 的 ramdisk 底座仍取自 OS4.0.4.0 的原厂 recovery，记在 `device.toml` 的 `[stock]`；两者不冲突——recovery 挂载的是装机系统的分区，版本是运行时从属性读出来的，`[stock]` 只给 `skyward-pack` 用。
 
 ## 已知限制
 
