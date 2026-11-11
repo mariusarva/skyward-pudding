@@ -29,6 +29,7 @@
 - **触摸等待放宽到 10 秒**：面板后到会自动恢复触摸，不再误判成“没有面板”
 - **文件管理提到首页**：首页工具区第一行就是文件管理，高级页里的入口也保留
 - **WiFi 自动连接**：设置里一个开关，打开后启动时自动开 WiFi 并用记住的密码连上次的网络；关掉即忘记。密码明文存在 `/metadata/skyward/wlan`（0600，root）
+- **连接提速**：等网络时每 3 秒补一次扫描（原来只扫一次，要等 supplicant 自己那轮）；DHCP 失败后 3 秒重试（原来 10 秒）
 
 ## 下载与刷入
 
@@ -37,7 +38,7 @@
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 b
-fastboot flash recovery_b skyward-pudding-20261110-v22-OS4.0.4.0.XPCCNXM.img
+fastboot flash recovery_b skyward-pudding-20261111-v23-OS4.0.4.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进，别用 fastboot reboot recovery
 ```
@@ -49,8 +50,8 @@ adb reboot recovery                          # 从系统进，别用 fastboot re
 ## 校验
 
 ```
-sha256  ff78d97fbab9c1645fd0178a5e995245010c8ca8d77e2c96221f9d0bcaa4701b
-md5     8b2f93ddf35f8cf5dd81e36fd3443b0e
+sha256  a1f66a53ea378cf13bfeb1d664410da5c87d214dd3699ce733ec777558de19a5
+md5     e74a97a641e8c363438a8d6839dc1af8
 大小    104857600
 ```
 
@@ -63,7 +64,7 @@ tar xzf skyward.tar.gz
 cd skyward-0.2.0
 
 # 2) 打本仓库的补丁
-patch -p1 < ../patches/skyward-pudding-v22.patch
+patch -p1 < ../patches/skyward-pudding-v23.patch
 
 # 3) 交叉编译（宿主 aarch64 也能编，见 docs/开发记录.md 的“两个坑”）
 rustup target add aarch64-linux-android

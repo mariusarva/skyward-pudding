@@ -1,6 +1,6 @@
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/main.rs
---- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-10 23:58:50.909860705 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/main.rs /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/main.rs
+--- /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/main.rs	2026-11-10 23:58:50.909860705 +0000
 @@ -26,6 +26,8 @@
  #[cfg(target_os = "android")]
  mod relabel;
@@ -148,9 +148,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
  /// Map and mount the slot's partitions from super, then bring up what runs
  /// from them. Recovery has to stay usable when super cannot be mounted, as
  /// after it is wiped, so the reason goes to the kernel log instead.
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/remember.rs
---- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/remember.rs /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/remember.rs
+--- /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/remember.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/remember.rs	2026-11-10 12:35:54.079999918 +0000
 @@ -0,0 +1,60 @@
 +//! The screen lock a user chose to have kept, so that the data partition
 +//! opens as the recovery starts rather than waiting for it to be typed.
@@ -212,9 +212,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
 +        Err(e) => Err(e).with_context(|| format!("remove {FILE}")),
 +    })
 +}
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/ui.rs
---- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-10 23:59:40.117860686 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/ui.rs /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/ui.rs
+--- /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/ui.rs	2026-11-11 01:26:06.611999957 +0000
 @@ -3,6 +3,8 @@
  use crate::filework;
  use crate::haptics::Haptics;
@@ -233,7 +233,17 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
  
  /// How long a panel gone dark rests, ready to light again at once, before
  /// the display turns off; the phone's own system keeps its panel dozing
-@@ -1057,6 +1059,7 @@
+@@ -982,6 +984,9 @@
+     Options { keep: app.state.keep_recovery && app.state.recovery_partitions, signed: app.state.check_signature }
+ }
+ 
++/// How often the network kept is looked for while the WLAN waits to join it.
++const LOOKING_FOR: Duration = Duration::from_secs(3);
++
+ /// How often the WLAN page scans while it shows.
+ const SCAN_EVERY: Duration = Duration::from_secs(10);
+ 
+@@ -1057,6 +1062,7 @@
      let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;
      let started = Instant::now();
      let mut touch_known = false;
@@ -241,7 +251,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
      // adbd and fastbootd ask over it to go over to fastboot and back.
      let control = Control::open()?;
      let mut haptics = cfg.haptics.as_ref().map(Haptics::open).transpose()?;
-@@ -1105,6 +1108,13 @@
+@@ -1105,6 +1111,13 @@
      // and the users whose own files are still closed once it is open.
      let mut decryptor: Option<Decryptor> = None;
      let mut closed: Vec<Closed> = Vec::new();
@@ -255,7 +265,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
      let mut arriving = Some(Incoming::Arrived);
      // The mount page shows the partitions as they are when it opens and
      // after each change; why they cannot be read is the page's to say.
-@@ -1355,6 +1365,14 @@
+@@ -1355,6 +1368,14 @@
          None => None,
      };
      let mut scanned_at = Instant::now();
@@ -270,7 +280,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
      app.state.update_server = cfg.update.is_some();
      // Asking the update server, and downloading the full package.
      let mut checker: Option<updates::Worker> = None;
-@@ -1374,6 +1392,17 @@
+@@ -1374,6 +1395,17 @@
      let mut drive_at = Instant::now();
      loop {
          let now = monotonic_ms();
@@ -288,7 +298,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
          if leave_at.is_some_and(|at| now >= at) {
              leave_at = None;
              power(leave)?;
-@@ -1383,8 +1412,17 @@
+@@ -1383,8 +1415,17 @@
              if !inputs.has_panel() {
                  skyward_sys::kmsg("no touch panel came up; the pages are worked with the keys")?;
                  app.touchscreen_missing();
@@ -306,7 +316,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
          for fx in app.tick(now) {
              match fx {
                  Effect::Haptic => {
-@@ -1913,6 +1951,59 @@
+@@ -1913,9 +1954,70 @@
                  app.set_traffic(t);
              }
          }
@@ -363,10 +373,22 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
 +                }
 +            }
 +        }
++        let wlan_on = app.state.wlan.as_ref().is_some_and(|w| w.power == WlanPower::On);
++        // The scan the driver answers with right after it comes up often holds
++        // nothing; the network kept is looked for more often than the page
++        // looks for its own, so that joining it does not wait for the
++        // supplicant's own slow round.
++        if app.state.wlan_auto && !wlan_joined && wlan_on && scanned_at.elapsed() >= LOOKING_FOR {
++            scanned_at = Instant::now();
++            wlan_worker(&wlan)?.send(wlan::Command::Scan);
++        }
          // The WLAN page scans again now and then while it shows, as the
          // stock settings do.
-         let wlan_on = app.state.wlan.as_ref().is_some_and(|w| w.power == WlanPower::On);
-@@ -2035,6 +2126,20 @@
+-        let wlan_on = app.state.wlan.as_ref().is_some_and(|w| w.power == WlanPower::On);
+         if app.screen() == Screen::Wlan && wlan_on && scanned_at.elapsed() >= SCAN_EVERY {
+             scanned_at = Instant::now();
+             wlan_worker(&wlan)?.send(wlan::Command::Scan);
+@@ -2035,6 +2137,20 @@
                      }
                      closed = opening.closed;
                      show_closed(&mut app, &closed)?;
@@ -387,7 +409,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
                  }
                  decrypt::Ended::Opened(Err(why)) => {
                      skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
-@@ -2051,11 +2156,42 @@
+@@ -2051,11 +2167,42 @@
                      app.data_failed(why);
                  }
                  decrypt::Ended::Unlocked(Ok(still)) => {
@@ -430,7 +452,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
                      app.unlock_failed(why, now);
                  }
              }
-@@ -2295,13 +2431,28 @@
+@@ -2295,13 +2442,28 @@
                      // under way, and takes nothing more until it is done.
                      Effect::OpenData => {
                          ensure!(decryptor.is_none(), "the data partition is being opened already");
@@ -460,7 +482,7 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
                      Effect::ReadDir(folder) => list(&mut app, folder)?,
                      Effect::ReadPlace(place, folder) => list_place(&mut app, place, folder)?,
                      // A name taken where an entry goes is the user's to
-@@ -2465,11 +2616,24 @@
+@@ -2465,11 +2627,24 @@
                          merger = Some(merge::Merger::start(slot, true)?);
                      }
                      Effect::Wlan(on) => wlan_worker(&wlan)?.send(if on { wlan::Command::On } else { wlan::Command::Off }),
@@ -485,9 +507,25 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
                          wlan_worker(&wlan)?.send(wlan::Command::Join { ssid, name, security, password: password.0 })
                      }
                      Effect::LeaveWlan => wlan_worker(&wlan)?.send(wlan::Command::Leave),
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/wlanmem.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/wlanmem.rs
---- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward/src/wlanmem.rs	1970-01-01 00:00:00.000000000 +0000
-+++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward/src/wlanmem.rs	2026-11-10 23:58:38.321860709 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/wlan.rs /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/wlan.rs
+--- /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/wlan.rs	2026-11-11 01:25:52.227999963 +0000
+@@ -55,8 +55,10 @@
+ /// goes.
+ const TRAFFIC: Duration = Duration::from_secs(1);
+ 
+-/// How long after the network gave no address it is asked again.
+-const RETRY: Duration = Duration::from_secs(10);
++/// How long after the network gave no address it is asked again. A router
++/// that takes back the address it offered is common right after it comes up,
++/// and ten seconds of waiting for a second go costs more than it saves.
++const RETRY: Duration = Duration::from_secs(3);
+ 
+ /// What the screen asks of the WLAN.
+ pub enum Command {
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/wlanmem.rs /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/wlanmem.rs
+--- /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward/src/wlanmem.rs	1970-01-01 00:00:00.000000000 +0000
++++ /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward/src/wlanmem.rs	2026-11-10 23:58:38.321860709 +0000
 @@ -0,0 +1,135 @@
 +//! The WLAN a user chose to have kept: whether the setting is on, and the
 +//! network joined last with the password it took, so that the recovery opens
@@ -624,9 +662,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
 +        assert_eq!(unhex("abc"), None);
 +    }
 +}
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-crypto/src/data.rs
---- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward-crypto/src/data.rs /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward-crypto/src/data.rs
+--- /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward-crypto/src/data.rs	2026-11-10 15:20:46.643999447 +0000
 @@ -32,6 +32,12 @@
  /// The phone's owner, the first of its users.
  const OWNER: u32 = 0;
@@ -692,9 +730,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
          lock,
      })
  }
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-modules/src/lib.rs
---- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-10 15:01:41.143999884 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward-modules/src/lib.rs /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward-modules/src/lib.rs
+--- /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward-modules/src/lib.rs	2026-11-10 15:01:41.143999884 +0000
 @@ -25,6 +25,10 @@
  /// loaded. Returns the files loaded, dependencies first.
  pub fn load(dirs: &[PathBuf], names: &[String]) -> Result<Vec<PathBuf>> {
@@ -716,9 +754,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
              insmod(&path, "")?;
              loaded.push(path);
          }
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-ui/src/app.rs
---- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-10 23:58:59.885860701 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward-ui/src/app.rs /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward-ui/src/app.rs
+--- /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward-ui/src/app.rs	2026-11-10 23:58:59.885860701 +0000
 @@ -557,6 +557,8 @@
      /// over.
      KeepRecovery,
@@ -849,9 +887,9 @@ diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/
      /// A button went down. With the keys working the page, the volume keys
      /// move the light from control to control and the power key works the
      /// one lit as it comes back up; otherwise the first volume press lights
-diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-ui/src/pages.rs
---- /tmp/tmp.Wti2do9mry/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
-+++ /tmp/tmp.7RJDoFlSMM/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-10 23:59:18.413860694 +0000
+diff -ruN '--exclude=target' '--exclude=.git' /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward-ui/src/pages.rs /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward-ui/src/pages.rs
+--- /tmp/tmp.Xe9jCoUJ5p/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-08 10:17:31.000000000 +0000
++++ /tmp/tmp.GGaHyhrdYL/skyward-0.2.0/crates/skyward-ui/src/pages.rs	2026-11-10 23:59:18.413860694 +0000
 @@ -160,6 +160,7 @@
  const WLAN: Text = ["WLAN", "Wi-Fi", "Wi-Fi"];
  const DECRYPT: Text = ["解密", "解密", "Decrypt"];
