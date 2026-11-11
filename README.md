@@ -2,7 +2,9 @@
 
 小米 17（`pudding`，OS4.0.4.0.XPCCNXM）可用的 Skyward recovery：**双系统 + data 解密**都能用。
 
-基于 [kirklin/skyward](https://github.com/kirklin/skyward) v0.2.0（GPL-3.0）自编译，改动见 `patches/`。
+基于 [kirklin/skyward](https://github.com/kirklin/skyward) v0.2.0（GPL-3.0）自编译，发布公告文案见 `docs/发布公告.md`。
+
+改动见 `patches/`。
 
 ## 这一版做了什么
 
