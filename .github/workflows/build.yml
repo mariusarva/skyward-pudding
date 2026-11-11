@@ -74,10 +74,11 @@ jobs:
           SYSROOT="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           BUILTINS=$(dirname "$(find "$NDK/toolchains/llvm/prebuilt/linux-x86_64/lib/clang" \
             -name 'libclang_rt.builtins-aarch64-android.a' | head -1)")
-          cat > /tmp/cc-aarch64.sh <<EOF
-          #!/bin/sh
-          exec clang --target=aarch64-linux-android30 --sysroot="$SYSROOT" -rtlib=compiler-rt -L"$BUILTINS" "\$@"
-          EOF
+          CLANG="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          ls -l "$CLANG"
+          printf '#!/bin/sh\nexec "%s" --target=aarch64-linux-android30 --sysroot="%s" -rtlib=compiler-rt -L"%s" "$@"\n' \
+            "$CLANG" "$SYSROOT" "$BUILTINS" > /tmp/cc-aarch64.sh
+          cat /tmp/cc-aarch64.sh
           chmod +x /tmp/cc-aarch64.sh
           RELEASE="${{ github.event.inputs.release || github.ref_name }}"
           RELEASE="${RELEASE#v}"
