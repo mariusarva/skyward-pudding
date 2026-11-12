@@ -151,3 +151,12 @@ tar czf depot.tar.gz ramdisk.lz4 orig-min.img   # 上传这个，把直链填进
 ## 许可
 
 沿用上游 GPL-3.0。本仓库的补丁与脚本同样以 GPL-3.0 发布；镜像内含 AOSP recovery 组件与 Skyward，来源与修改见 `patches/` 与 `docs/开发记录.md`。
+
+## 换机型或换 ROM 时：weaver_first
+
+`device.toml` 的 `[data] weaver_first` 决定 `sp-handle` 指向 weaver 绑定 blob 时走哪条路：
+
+- `false`（本机默认）：直接改用同一用户里带 `.secdis` + `.pwd` 的那个 gatekeeper 绑定 blob。适合 weaver 在恢复里跑不起来的机器（这台是 Thales weaver，只经 OMAPI 访问安全元件）。
+- `true`：先按官方语义用 weaver 解，weaver 不应答再回退。适合 NXP 或 Goodix eSE 的机器。
+
+判据只有一条：`/odm/lib64/` 或 `/vendor/lib64/` 里那个 weaver 的 `.so` 是否依赖 `android.se.omapi-V1-ndk.so`。依赖它，就是 Thales 那类，恢复里起不来，保持 `false`。
