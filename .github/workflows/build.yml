@@ -1,6 +1,6 @@
 name: build
 
-# 按 tag 构建整份镜像；也可以在 Actions 页面手动触发。
+# 手动触发才构建整份镜像。tag 不再触发，Release 也不再自动挂 img：
 #
 # 需要两个仓库 secret（Settings → Secrets and variables → Actions）：
 #   DEPOT_URL    底座包的下载地址（一个 tar.gz，里面至少要有）
@@ -8,11 +8,9 @@ name: build
 #                   orig.img      打包用的模板（原厂 recovery 镜像，avbwrap.py 要读它的头和 AVB 模板）
 #   DEPOT_TOKEN  DEPOT_URL 需要的令牌，没有就留空
 #
-# 产出的 out.img 既作为 artifact 留存，tag 触发时还会挂到该 tag 的 Release 上。
+# 发布用的镜像是本机出的那份；这一份是拿仓库 patch 重编的，只留作 artifact 对照。
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
       release:
@@ -127,9 +125,3 @@ jobs:
           path: |
             skyward-pudding-*.img
             SHA256SUMS
-
-      - name: 挂到 Release
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" skyward-pudding-*.img SHA256SUMS --clobber
