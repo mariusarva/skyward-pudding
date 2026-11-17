@@ -2010,7 +2010,15 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
      /// Asking the update server, and downloading the full package.
      checker: Option<updates::Worker>,
      downloader: Option<updates::Worker>,
-@@ -1365,6 +1457,15 @@
+@@ -1340,6 +1432,7 @@
+         // partitions in both slots, which a switch writes.
+         let by_name = Path::new(skyward_block::BY_NAME);
+         let both = |base: &str| -> Result<bool> { Ok(by_name.join(format!("{base}_a")).try_exists()? && by_name.join(format!("{base}_b")).try_exists()?) };
++        app.state.updates = cfg.device.update;
+         app.state.recovery_partitions = both("recovery")?;
+         app.state.dual_boot = app.state.recovery_partitions && both("boot")? && both("init_boot")?;
+         // The second system's work; the systems are read at once, for the home
+@@ -1365,6 +1458,15 @@
                  app.report(&format!("{e:#}"), monotonic_ms());
              }
          }
@@ -2026,7 +2034,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          Ok(Pages {
              cfg,
              programs,
-@@ -1405,7 +1506,12 @@
+@@ -1405,7 +1507,12 @@
              erase_leaves: false,
              rescue_erasing: false,
              decryptor: None,
@@ -2039,7 +2047,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              part_worker: None,
              worker: None,
              relabeler: None,
-@@ -1414,9 +1520,25 @@
+@@ -1414,9 +1521,25 @@
              systems_worker,
              switch_asked: false,
              switched: false,
@@ -2066,7 +2074,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              checker: None,
              downloader: None,
              skyward_checker: None,
-@@ -1467,6 +1589,7 @@
+@@ -1467,6 +1590,7 @@
                      match needs {
                          Needs::Data | Needs::User(_) => {
                              self.app.asked_opening();
@@ -2074,7 +2082,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
                              self.decryptor = Some(Decryptor::start(decrypt::Job::Open)?);
                              self.pending = Some(wanted);
                          }
-@@ -1522,7 +1645,14 @@
+@@ -1522,7 +1646,14 @@
              && !self.sideloading
              && let Err(e) = skyward_sys::usb::switch(skyward_sys::usb::resting(), USB_TIMEOUT)
          {
@@ -2090,7 +2098,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              self.app.report(&format!("{e:#}"), monotonic_ms());
          }
          if let Some(slot) = self.info.slot {
-@@ -1542,9 +1672,44 @@
+@@ -1542,9 +1673,44 @@
                  let _ = skyward_sys::kmsg(&format!("the vendor interface's libraries are not open: {e:#}"));
                  None
              });
@@ -2136,7 +2144,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          self.app.state.update_server = cfg.update.is_some();
          self.drive_at = Instant::now();
          Ok(())
-@@ -1562,12 +1727,25 @@
+@@ -1562,12 +1728,25 @@
          }
          if !self.touch_known && self.started.elapsed() >= TOUCH_WAIT {
              self.touch_known = true;
@@ -2162,7 +2170,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          self.take_readings(now)?;
          // In fastboot the page follows fastbootd and the cable each second.
          if self.fastboot && self.port_at.elapsed().as_secs() >= 1 {
-@@ -1611,6 +1789,20 @@
+@@ -1611,6 +1790,20 @@
          self.offer_storage(now)
      }
  
@@ -2183,7 +2191,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
      /// What time passing asks for: the motor's clicks and ticks, and the
      /// status bar's clock drawn again as its minute turns.
      fn tick(&mut self, now: u64) -> Result<()> {
-@@ -1620,7 +1812,15 @@
+@@ -1620,7 +1813,15 @@
                  // The power key held past its wait for volume down turns
                  // the screen off.
                  Effect::Ticks => self.ticks()?,
@@ -2200,7 +2208,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              }
          }
          let time = clock(self.app.state.time_zone)?;
-@@ -1628,21 +1828,35 @@
+@@ -1628,21 +1829,35 @@
              self.shown_clock = time;
              self.app.redraw();
          }
@@ -2240,7 +2248,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          }
          Ok(())
      }
-@@ -1723,6 +1937,11 @@
+@@ -1723,6 +1938,11 @@
              // refresh.
              self.surface.speed_up()?;
              self.rested_at = None;
@@ -2252,7 +2260,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          } else if self.surface.is_on() {
              // With the backlight off, the panel rests, and the touch
              // controller following it stops drawing power.
-@@ -2020,8 +2239,23 @@
+@@ -2020,8 +2240,23 @@
          }
          if worked {
              self.worker = None;
@@ -2278,7 +2286,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          }
          Ok(())
      }
-@@ -2196,11 +2430,229 @@
+@@ -2196,11 +2431,229 @@
                  self.app.set_traffic(t);
              }
          }
@@ -2508,7 +2516,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          Ok(())
      }
  
-@@ -2334,6 +2786,36 @@
+@@ -2334,6 +2787,36 @@
                  }
                  self.closed = opening.closed;
                  show_closed(&mut self.app, &self.closed)?;
@@ -2545,7 +2553,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              }
              decrypt::Ended::Opened(Err(why)) => {
                  skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
-@@ -2349,9 +2831,38 @@
+@@ -2349,9 +2832,38 @@
              decrypt::Ended::Unlocked(Ok(still)) => {
                  self.closed = still;
                  show_closed(&mut self.app, &self.closed)?;
@@ -2584,7 +2592,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
                  self.app.unlock_failed(why, now);
              }
          }
-@@ -2465,7 +2976,21 @@
+@@ -2465,7 +2977,21 @@
              let mut queue = VecDeque::from(effects);
              while let Some(fx) = queue.pop_front() {
                  eprintln!("effect {fx:?}");
@@ -2607,7 +2615,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              }
          }
          Ok(())
-@@ -2553,22 +3078,34 @@
+@@ -2553,22 +3079,34 @@
              // The decrypt page shows meanwhile that the work is
              // under way, and takes nothing more until it is done.
              Effect::OpenData => {
@@ -2646,7 +2654,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              Effect::StopJob => self.worker.as_ref().context("there is no work on files to stop")?.stop(),
              Effect::Relabel => self.relabel(now)?,
              Effect::StopRelabel => self.relabeler.as_ref().context("there is no relabeling to stop")?.stop(),
-@@ -2605,9 +3142,149 @@
+@@ -2605,9 +3143,149 @@
                  wlan_worker(&self.wlan)?.send(wlan::Command::Scan);
              }
              Effect::JoinWlan { ssid, name, security, password } => {
@@ -2796,7 +2804,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              Effect::CheckUpdate => self.check_update()?,
              Effect::Download(release) => self.download(release, now)?,
              Effect::StopDownload => self.downloader.as_ref().context("there is no download to stop")?.stop(),
-@@ -2796,8 +3473,49 @@
+@@ -2796,8 +3474,49 @@
  
      /// Copy or move `path` into the folder `into`. A name taken where an
      /// entry goes is the user's to decide on before anything is written.
@@ -2846,7 +2854,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          let clash = match clash {
              Some(choice) => clash_rule(choice),
              None => match skyward_files::clashes(&[PathBuf::from(&path)], Path::new(&into)) {
-@@ -2820,7 +3538,7 @@
+@@ -2820,7 +3539,7 @@
                  return Ok(());
              }
          };
@@ -3512,23 +3520,36 @@ diff -ruN a/crates/skyward-config/src/lib.rs b/crates/skyward-config/src/lib.rs
      #[serde(default)]
      pub wipe: Wipe,
      #[serde(default)]
-@@ -772,6 +804,7 @@
+@@ -271,6 +303,11 @@
+     /// System property that carries the vendor OS version.
+     #[serde(default = "default_os_version_prop")]
+     pub os_version_prop: String,
++    /// Whether this build offers to update itself in place. A build made for
++    /// one phone is not another's: a phone whose releases are not its own
++    /// turns this off, so the page never pulls another phone's image here.
++    #[serde(default = "default_true")]
++    pub update: bool,
+ }
+ 
+ #[derive(Debug, Clone, Default, Deserialize)]
+@@ -772,6 +809,17 @@
          assert_eq!((touch.user.as_deref(), &touch.capabilities[..]), (Some("system"), &["SYS_NICE".to_string()][..]));
      }
  
 +
++    #[test]
++    fn a_phone_whose_releases_are_not_its_own_does_not_offer_to_update_itself() {
++        // 构建自己更新自己这件事由配置说：认领本仓 release 的机型默认开，
++        // 不认领的（例如另仓发布的机型）写 false。
++        let off = "[device]\ncodename = \"x\"\nupdate = false\n[display]\nwidth = 1\nheight = 1\ndensity = 1\n";
++        assert!(!DeviceConfig::parse(off).unwrap().device.update);
++        let on = "[device]\ncodename = \"x\"\n[display]\nwidth = 1\nheight = 1\ndensity = 1\n";
++        assert!(DeviceConfig::parse(on).unwrap().device.update, "left on by default");
++    }
++
      #[test]
      fn each_phone_names_the_stock_build_its_recovery_is_made_on() {
          for (text, version) in [
-@@ -791,7 +824,7 @@
-             (include_str!("../../../devices/dada.toml"), "OS3.0.307.0.WOCCNXM"),
-             (include_str!("../../../devices/haotian.toml"), "OS3.0.309.0.WOBCNXM"),
-             (include_str!("../../../devices/xuanyuan.toml"), "OS3.0.314.0.WOACNXM"),
--            (include_str!("../../../devices/byron.toml"), "OS3.0.310.0.WAFCNXM"),
-+            (include_str!("../../../devices/byron.toml"), "OS4.0.3.0.XAFCNXM"),
-             (include_str!("../../../devices/zorn.toml"), "OS3.0.309.0.WOKCNXM"),
-             (include_str!("../../../devices/miro.toml"), "OS3.0.305.0.WOMCNXM"),
-             (include_str!("../../../devices/annibale.toml"), "OS3.0.307.0.WPKCNXM"),
 diff -ruN a/crates/skyward-crypto/src/data.rs b/crates/skyward-crypto/src/data.rs
 --- a/crates/skyward-crypto/src/data.rs	2026-11-17 00:00:00.000000000 +0000
 +++ b/crates/skyward-crypto/src/data.rs	2026-11-17 00:00:00.000000000 +0000
@@ -7354,17 +7375,19 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
  /// Choices the pages show and the user changes, and where installing
  /// stands.
  #[derive(Clone, Debug, PartialEq)]
-@@ -87,6 +115,9 @@
+@@ -87,6 +115,11 @@
      /// partitions in both slots, which a switch writes, and recovery
      /// partitions apart from them, which keep Skyward through it.
      pub dual_boot: bool,
++    /// Whether this build offers to update itself, as its device says.
++    pub updates: bool,
 +    /// A copy or a move waiting to be told where it goes: the phone or the
 +    /// drive, asked before the folder it lands in is walked to.
 +    pub place_ask: Option<crate::app::FileOp>,
      /// The systems, as the runtime last read them, or why it could not;
      /// none until it has.
      pub systems: Option<Result<Overview, String>>,
-@@ -101,6 +132,14 @@
+@@ -101,6 +134,14 @@
      /// Where the data partition stands, and what is typed at the screen
      /// lock its users' own files wait on.
      pub data: Data,
@@ -7379,7 +7402,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      pub code: String,
      /// What is typed in the search field.
      pub search: String,
-@@ -111,6 +150,21 @@
+@@ -111,6 +152,21 @@
      pub held: Option<Action>,
      /// The folder the file manager shows.
      pub files: Folder,
@@ -7401,7 +7424,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      /// The folder of internal storage a file to install is chosen in, its
      /// path from the top of the storage.
      pub storage: Folder,
-@@ -134,6 +188,18 @@
+@@ -134,6 +190,18 @@
      /// Deleting the entry the file page shows, or the backup the restore
      /// page shows, was asked for; a swipe confirms it.
      pub asking_delete: bool,
@@ -7420,7 +7443,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      /// A copy or move waiting on what to do with the names taken where it
      /// goes, and those names.
      pub clash: Option<(Clip, String, Vec<String>)>,
-@@ -158,6 +224,29 @@
+@@ -158,6 +226,29 @@
      /// The WLAN, as the runtime last told it; none on a phone whose WLAN the
      /// recovery does not bring up.
      pub wlan: Option<Wlan>,
@@ -7450,10 +7473,11 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      /// The network the password page is for, and what is typed there.
      pub joining: Option<Network>,
      /// The network the details page is of, as it was found.
-@@ -224,16 +313,26 @@
+@@ -224,16 +315,27 @@
              boot_slots: None,
              next_slot: None,
              dual_boot: false,
++            updates: true,
 +            place_ask: None,
              systems: None,
              system_pick: None,
@@ -7477,7 +7501,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              storage: Folder::new(""),
              usb_drive: None,
              drive: Folder::new(""),
-@@ -245,6 +344,11 @@
+@@ -245,6 +347,11 @@
              new_name: String::new(),
              editor: None,
              asking_delete: false,
@@ -7489,7 +7513,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              clash: None,
              job: None,
              relabel: None,
-@@ -254,6 +358,17 @@
+@@ -254,6 +361,17 @@
              part_work: None,
              update: Standing::None,
              wlan: None,
@@ -7507,7 +7531,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              joining: None,
              details: None,
              adding: None,
-@@ -284,6 +399,7 @@
+@@ -284,6 +402,7 @@
      pub fn folder(&self, screen: Screen) -> &Folder {
          match screen {
              Screen::Files => &self.files,
@@ -7515,7 +7539,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              Screen::Choose(Place::Storage) => &self.storage,
              Screen::Choose(Place::UsbDrive) => &self.drive,
              other => unreachable!("{other:?} lists no folder"),
-@@ -293,6 +409,7 @@
+@@ -293,6 +412,7 @@
      pub(super) fn folder_mut(&mut self, screen: Screen) -> &mut Folder {
          match screen {
              Screen::Files => &mut self.files,
@@ -7523,7 +7547,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              Screen::Choose(Place::Storage) => &mut self.storage,
              Screen::Choose(Place::UsbDrive) => &mut self.drive,
              other => unreachable!("{other:?} lists no folder"),
-@@ -301,6 +418,28 @@
+@@ -301,6 +421,28 @@
  
      /// Whether the files of `place` can be read: internal storage once it
      /// is open, a USB drive once the runtime shows it.
@@ -7552,6 +7576,15 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      pub fn place_open(&self, place: Place) -> bool {
          match place {
              Place::Storage => self.data.storage_open(),
+@@ -345,7 +487,7 @@
+     pub fn offers(&self, screen: Screen) -> bool {
+         match screen {
+             Screen::Wlan => self.wlan.is_some(),
+-            Screen::SkywardUpdate => self.wlan.is_some() && self.recovery_partitions,
++            Screen::SkywardUpdate => self.updates && self.wlan.is_some() && self.recovery_partitions,
+             Screen::Systems => self.dual_boot,
+             _ => true,
+         }
 diff -ruN a/crates/skyward-ui/src/app/systems.rs b/crates/skyward-ui/src/app/systems.rs
 --- a/crates/skyward-ui/src/app/systems.rs	2026-11-17 00:00:00.000000000 +0000
 +++ b/crates/skyward-ui/src/app/systems.rs	2026-11-17 00:00:00.000000000 +0000
@@ -9795,408 +9828,6 @@ diff -ruN a/crates/skyward-ui/src/widgets.rs b/crates/skyward-ui/src/widgets.rs
              status_bar(&mut c, &t, &f, &bar, t.pal.status);
              c
          };
-Binary files a/devices/byron/files/odm/bin/hw/android.hardware.weaver-service.nxp-qti and b/devices/byron/files/odm/bin/hw/android.hardware.weaver-service.nxp-qti differ
-diff -ruN a/devices/byron/files/skyward/se-qti.sh b/devices/byron/files/skyward/se-qti.sh
---- a/devices/byron/files/skyward/se-qti.sh	1970-01-01 00:00:00.000000000 +0000
-+++ b/devices/byron/files/skyward/se-qti.sh	2026-11-17 00:00:00.000000000 +0000
-@@ -0,0 +1,21 @@
-+#!/system/bin/sh
-+# The secure element HAL, running on the recovery's own libraries. The NXP
-+# NFC/eSE driver is not among the modules the recovery loads, and the chip
-+# has to answer before the HAL's TA can come up, so load it first and bring
-+# the HAL back until it stays.
-+
-+insmod /vendor/lib/modules/nxp-nci.ko 2>/dev/null
-+i=0
-+while [ ! -e /dev/nq-nci ] && [ $i -lt 30 ]; do
-+    sleep 1
-+    i=$((i + 1))
-+done
-+
-+export LD_LIBRARY_PATH=/system/lib64:/vendor/lib64:/vendor/lib64/hw:/odm/lib64:/skyward/lib64
-+i=0
-+while [ $i -lt 900 ]; do
-+    /skyward/hw/se-qti && exit 0
-+    i=$((i + 1))
-+    sleep 2
-+done
-+exit 1
-diff -ruN a/devices/byron/files/skyward/weaver-nxp.sh b/devices/byron/files/skyward/weaver-nxp.sh
---- a/devices/byron/files/skyward/weaver-nxp.sh	1970-01-01 00:00:00.000000000 +0000
-+++ b/devices/byron/files/skyward/weaver-nxp.sh	2026-11-17 00:00:00.000000000 +0000
-@@ -0,0 +1,13 @@
-+#!/system/bin/sh
-+# The NXP weaver behind the phone's secure element. Its transport opens the
-+# element as the program comes up, so it waits for the secure element HAL
-+# instead of aborting once and staying down.
-+export LD_LIBRARY_PATH=/skyward/lib64:/odm/lib64:/vendor/lib64:/vendor/lib64/hw:/system/lib64
-+export LD_PRELOAD=/skyward/lib64/libbinder.so
-+i=0
-+while [ $i -lt 900 ]; do
-+    /skyward/hw/weaver-nxp && exit 0
-+    i=$((i + 1))
-+    sleep 2
-+done
-+exit 1
-Binary files a/devices/byron/files/system/lib64/android.hardware.weaver-V2-ndk.so and b/devices/byron/files/system/lib64/android.hardware.weaver-V2-ndk.so differ
-Binary files a/devices/byron/files/system/lib64/android.se.omapi-V1-ndk.so and b/devices/byron/files/system/lib64/android.se.omapi-V1-ndk.so differ
-Binary files a/devices/byron/files/system/lib64/libapexsupport.so and b/devices/byron/files/system/lib64/libapexsupport.so differ
-Binary files a/devices/byron/files/system/lib64/libbase.so and b/devices/byron/files/system/lib64/libbase.so differ
-Binary files a/devices/byron/files/system/lib64/libbinder.so and b/devices/byron/files/system/lib64/libbinder.so differ
-Binary files a/devices/byron/files/system/lib64/libbinder_ndk.so and b/devices/byron/files/system/lib64/libbinder_ndk.so differ
-Binary files a/devices/byron/files/system/lib64/libcutils.so and b/devices/byron/files/system/lib64/libcutils.so differ
-Binary files a/devices/byron/files/system/lib64/libdl_android.so and b/devices/byron/files/system/lib64/libdl_android.so differ
-Binary files a/devices/byron/files/system/lib64/libhardware.so and b/devices/byron/files/system/lib64/libhardware.so differ
-Binary files a/devices/byron/files/system/lib64/libhidlbase.so and b/devices/byron/files/system/lib64/libhidlbase.so differ
-Binary files a/devices/byron/files/system/lib64/liblog.so and b/devices/byron/files/system/lib64/liblog.so differ
-Binary files a/devices/byron/files/system/lib64/libprocessgroup.so and b/devices/byron/files/system/lib64/libprocessgroup.so differ
-Binary files a/devices/byron/files/system/lib64/libutils.so and b/devices/byron/files/system/lib64/libutils.so differ
-Binary files a/devices/byron/files/system/lib64/libvndksupport.so and b/devices/byron/files/system/lib64/libvndksupport.so differ
-Binary files a/devices/byron/files/vendor/bin/hw/android.hardware.secure_element-service.qti and b/devices/byron/files/vendor/bin/hw/android.hardware.secure_element-service.qti differ
-Binary files a/devices/byron/files/vendor/lib64/android.hardware.secure_element-V1-ndk.so and b/devices/byron/files/vendor/lib64/android.hardware.secure_element-V1-ndk.so differ
-Binary files a/devices/byron/files/vendor/lib64/android.hardware.secure_element@1.0.so and b/devices/byron/files/vendor/lib64/android.hardware.secure_element@1.0.so differ
-Binary files a/devices/byron/files/vendor/lib64/hw/libEseUtils.so and b/devices/byron/files/vendor/lib64/hw/libEseUtils.so differ
-Binary files a/devices/byron/files/vendor/lib64/libGPQeSE.so and b/devices/byron/files/vendor/lib64/libGPQeSE.so differ
-Binary files a/devices/byron/files/vendor/lib64/libQSEEComAPI.so and b/devices/byron/files/vendor/lib64/libQSEEComAPI.so differ
-Binary files a/devices/byron/files/vendor/lib64/libstnfc-streset.so and b/devices/byron/files/vendor/lib64/libstnfc-streset.so differ
-diff -ruN a/devices/byron.toml b/devices/byron.toml
---- a/devices/byron.toml	2026-11-17 00:00:00.000000000 +0000
-+++ b/devices/byron.toml	2026-11-17 00:00:00.000000000 +0000
-@@ -83,10 +83,13 @@
- # The stock build the recovery is made on: the Chinese system's
- # OS3.0.310.0, whose full update package on the phone maker's own download
- # server holds the recovery partition the recovery is built on top of.
-+# 自建基线：本机 OS4.0.3.0.XAFCNXM（Android 17）的恢复分区。package 指向本 fork 的
-+# Release 资源（zip 内即 recovery.img）；拿到 Xiaomi 官方 ota_full 地址后可换回官方 URL，
-+# 并把 build.yml 的取料步骤还原为 skyward-pack stock。
- [stock]
--version = "OS3.0.310.0.WAFCNXM"
--package = "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS3.0.310.0.WAFCNXM/byron-ota_full-OS3.0.310.0.WAFCNXM-user-16.0-af218e1233.zip"
--recovery = "da70265665598f9d66e18bfe49d681b33da63d7ddb1a73375e8f1c7433710e25"
-+version = "OS4.0.3.0.XAFCNXM"
-+package = "https://github.com/north1952/skyward/releases/download/OS4.0.3.0.XAFCNXM/byron-ota_full-OS4.0.3.0.XAFCNXM-user-17.0-8a167311.zip"
-+recovery = "8a167311d5c2c90f515ecb1f738154cd55159672a80fcf7fe56cedd214eb709a"
- 
- # qcom-hv-haptics (qcom,hv-haptics in its dtbo), with the click made from
- # samples at the motor's resonant frequency as on the 17 Ultra. The
-@@ -94,3 +97,115 @@
- [haptics]
- resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
- strength = { lightest = 0.25, strongest = 0.75 }
-+
-+# 解密链：本机系统的 libdl_android.so 只是指向 /apex/... 的软链，recovery 不挂
-+# APEX，所以把能解密的那份 recovery（YAPR）里的 weaver 与它依赖的库一起带进来，
-+# 放在 /skyward 下，不覆盖 /system/lib64，免得影响其他进程。
-+
-+[[file]]
-+path = "system/lib64/libdl_android.so"
-+source = "devices/byron/files/system/lib64/libdl_android.so"
-+
-+[[file]]
-+path = "system/lib64/libvndksupport.so"
-+source = "devices/byron/files/system/lib64/libvndksupport.so"
-+
-+[[file]]
-+path = "system/lib64/libapexsupport.so"
-+source = "devices/byron/files/system/lib64/libapexsupport.so"
-+
-+[[file]]
-+path = "skyward/lib64/libhardware.so"
-+source = "devices/byron/files/system/lib64/libhardware.so"
-+
-+[[file]]
-+path = "skyward/lib64/libbase.so"
-+source = "devices/byron/files/system/lib64/libbase.so"
-+
-+[[file]]
-+path = "skyward/lib64/libutils.so"
-+source = "devices/byron/files/system/lib64/libutils.so"
-+
-+[[file]]
-+path = "skyward/lib64/liblog.so"
-+source = "devices/byron/files/system/lib64/liblog.so"
-+
-+[[file]]
-+path = "skyward/lib64/libcutils.so"
-+source = "devices/byron/files/system/lib64/libcutils.so"
-+
-+[[file]]
-+path = "skyward/lib64/libbinder_ndk.so"
-+source = "devices/byron/files/system/lib64/libbinder_ndk.so"
-+
-+[[file]]
-+path = "skyward/lib64/libbinder.so"
-+source = "devices/byron/files/system/lib64/libbinder.so"
-+
-+[[file]]
-+path = "skyward/lib64/libhidlbase.so"
-+source = "devices/byron/files/system/lib64/libhidlbase.so"
-+
-+[[file]]
-+path = "skyward/lib64/libprocessgroup.so"
-+source = "devices/byron/files/system/lib64/libprocessgroup.so"
-+
-+[[file]]
-+path = "system/lib64/android.hardware.weaver-V2-ndk.so"
-+source = "devices/byron/files/system/lib64/android.hardware.weaver-V2-ndk.so"
-+
-+[[file]]
-+path = "system/lib64/android.se.omapi-V1-ndk.so"
-+source = "devices/byron/files/system/lib64/android.se.omapi-V1-ndk.so"
-+
-+[[file]]
-+path = "skyward/hw/weaver-nxp"
-+source = "devices/byron/files/odm/bin/hw/android.hardware.weaver-service.nxp-qti"
-+mode = 0o755
-+
-+[[file]]
-+path = "skyward/se-qti.sh"
-+source = "devices/byron/files/skyward/se-qti.sh"
-+mode = 0o755
-+
-+[[file]]
-+path = "skyward/weaver-nxp.sh"
-+source = "devices/byron/files/skyward/weaver-nxp.sh"
-+mode = 0o755
-+
-+[[file]]
-+path = "skyward/hw/se-qti"
-+source = "devices/byron/files/vendor/bin/hw/android.hardware.secure_element-service.qti"
-+mode = 0o755
-+[[file]]
-+path = "system/lib64/libEseUtils.so"
-+source = "devices/byron/files/vendor/lib64/hw/libEseUtils.so"
-+[[file]]
-+path = "system/lib64/libGPQeSE.so"
-+source = "devices/byron/files/vendor/lib64/libGPQeSE.so"
-+[[file]]
-+path = "system/lib64/libQSEEComAPI.so"
-+source = "devices/byron/files/vendor/lib64/libQSEEComAPI.so"
-+[[file]]
-+path = "system/lib64/libstnfc-streset.so"
-+source = "devices/byron/files/vendor/lib64/libstnfc-streset.so"
-+[[file]]
-+path = "system/lib64/android.hardware.secure_element-V1-ndk.so"
-+source = "devices/byron/files/vendor/lib64/android.hardware.secure_element-V1-ndk.so"
-+[[file]]
-+path = "system/lib64/android.hardware.secure_element@1.0.so"
-+source = "devices/byron/files/vendor/lib64/android.hardware.secure_element@1.0.so"
-+
-+# 安全芯片 HAL 与 weaver：都从 /skyward 起，root 身份，库路径带恢复自带的清单，
-+# 与能解密的 YAPR 恢复一致。HAL 先起，weaver 自己会等它。
-+[[service]]
-+path = "/system/bin/sh"
-+args = ["/skyward/se-qti.sh"]
-+user = "root"
-+groups = ["nfc", "root"]
-+
-+[[service]]
-+path = "/system/bin/sh"
-+args = ["/skyward/weaver-nxp.sh"]
-+user = "root"
-+groups = ["root"]
-diff -ruN a/devices/byron.toml.upstream b/devices/byron.toml.upstream
---- a/devices/byron.toml.upstream	1970-01-01 00:00:00.000000000 +0000
-+++ b/devices/byron.toml.upstream	2026-11-17 00:00:00.000000000 +0000
-@@ -0,0 +1,198 @@
-+[device]
-+codename = "byron"
-+brand = "Xiaomi"
-+model = "Xiaomi 17 Max"
-+ab = true
-+soc = { hans = "第五代骁龙®8至尊版移动平台", hant = "Snapdragon® 8 Elite Gen 5 行動平台", en = "Snapdragon® 8 Elite Gen 5 Mobile Platform" }
-+os_version_prop = "ro.mi.os.version.incremental"
-+
-+[display]
-+# persist.sys.miui_resolution in the odm partition's build.prop, which is
-+# the byron panel's own mode in the device tree.
-+width = 1200
-+height = 2608
-+density = 480
-+
-+[modules]
-+sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
-+# The touchscreen: Synaptics TouchComm over SPI behind Xiaomi's touch
-+# layer, the one touch driver the phone's own modules.load lists.
-+load = ["synaptics_tcm2"]
-+
-+# As on the 17 Ultra, no init script of the phone's starts touch_report:
-+# the touch feature service turns the controller's raw frames into
-+# touches with /odm/lib64/libtouchreport.so, and a recovery runs none of
-+# it. Told through Xiaomi's touch layer, the driver has the controller
-+# report positions itself; that is known of the 17 Ultra's Synaptics
-+# controller and not yet tried on this phone's.
-+[touch]
-+writes = [{ path = "/sys/class/touch/touch_dev/enable_touch_raw", value = "0" }]
-+
-+# The firmware of the WLAN chip is on the modem partition, which the phone
-+# mounts at /vendor/firmware_mnt and its own recovery leaves unmounted, as
-+# the 17 Ultra's does.
-+[firmware]
-+partition = "modem"
-+
-+# The persist partition, which the phone mounts at /mnt/vendor/persist and
-+# its own recovery leaves unmounted. The WLAN's MAC address is there.
-+[partitions]
-+mounted = ["persist"]
-+
-+# Its stock recovery leaves out libsysutils and libcap, which the
-+# recovery's own logd loads, as the 17 Ultra's does.
-+[logd]
-+libraries = ["/mnt/system/system/lib64/libsysutils.so", "/mnt/system/system/lib64/libcap.so"]
-+
-+# What the phone's own init runs once the system has finished starting, as
-+# kernel-post-boot in /vendor/etc/init/hw/init.qti.kernel.rc. The kernel
-+# starts the CPU clusters on the performance governor, which holds them at
-+# their highest clock; the script hands them to WALT, lets idle CPUs power
-+# down and sets how the memory bus scales. Without it the CPUs stay at
-+# their highest clock and voltage even while idle, and the phone slowly
-+# heats up.
-+[[service]]
-+path = "/vendor/bin/sh"
-+args = ["/vendor/bin/init.kernel.post_boot.sh"]
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+oneshot = true
-+user = "root"
-+groups = ["root", "system", "wakelock", "graphics"]
-+
-+# WLAN: the peach node in the device tree, driven by qca_cld3_peach_v2, the
-+# one Peach driver the phone's own modules.load lists, as on the 17 Ultra.
-+# Its cfg80211 asks for rfkill, one of the kernel's own modules in
-+# system_dlkm. The driver reads its settings and the MAC address through
-+# the firmware loader, from links the vendor partition keeps in its own
-+# firmware folder, into the vendor partition and into persist.
-+# wpa_supplicant runs on the recovery's own libraries before the vendor
-+# partition's, as on the 17 Ultra.
-+[[service]]
-+path = "/vendor/bin/sh"
-+args = ["/vendor/bin/init.kernel.post_boot.sh"]
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+oneshot = true
-+user = "root"
-+groups = ["root", "system", "wakelock", "graphics"]
-+
-+# The secure world reaches back into Android through the listeners this
-+# daemon registers; without them the key service cannot use any key.
-+[[service]]
-+path = "/vendor/bin/qseecomd"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+ready_property = "vendor.sys.listeners.registered"
-+user = "root"
-+groups = ["root", "drmrpc"]
-+
-+# The opener the secure world's apps are reached through by programs that
-+# speak to them as GlobalPlatform's TEE client does, which loads those apps
-+# from /vendor/firmware_mnt/image as they are first asked for.
-+[[service]]
-+path = "/vendor/bin/hlosminkdaemon"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+user = "system"
-+groups = ["system", "oem_2912", "wakelock"]
-+capabilities = ["WAKE_ALARM", "BLOCK_SUSPEND"]
-+
-+# The key service, which is the only thing that can use the keys the phone
-+# wrapped in hardware. The same program serves the secure clock and the
-+# shared secret, which the phone describes apart from it.
-+[[service]]
-+path = "/vendor/bin/hw/android.hardware.security.onekeymint-service-qti"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
-+registers = [
-+    "android.hardware.security.keymint.IRemotelyProvisionedComponent/default",
-+    "android.hardware.security.secureclock.ISecureClock/default",
-+    "android.hardware.security.sharedsecret.ISharedSecret/default",
-+]
-+user = "system"
-+groups = ["system", "drmrpc"]
-+
-+# The credential service: it is what the secure world has check the secret
-+# behind a screen lock, and the only thing that can hand out the note the
-+# key service wants before it will use a key that secret guards.
-+[[service]]
-+path = "/vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+ready_service = "android.hardware.gatekeeper.IGatekeeper/default"
-+user = "system"
-+groups = ["system"]
-+
-+# The weaver, in the secure element of the builds whose odm properties set
-+# ro.special_edition: Goodix's, behind its own service, which reaches it
-+# through the secure world. Every user's secret is bound to a slot of it,
-+# with a screen lock or without. The phone's init puts the description of
-+# what the secure element's service registers in place of an empty one on
-+# those builds. Both programs load the vendor partition's libhardware,
-+# which asks for the installed system's libvndksupport, and that for its
-+# libdl_android, of which only the copy in bootstrap is a file rather than
-+# a link into a bundle; the installed system's libraries come last, so only
-+# these two are taken from them. The other builds keep their weaver in a
-+# Thales secure element, which its service reaches only through Android's
-+# own OMAPI service, and a recovery runs none of Android's framework.
-+[[service]]
-+path = "/odm/bin/hw/android.hardware.secure_element-service-goodix"
-+libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"]
-+ready_service = "android.hardware.secure_element.ISecureElement/eSE2"
-+registers = ["vendor.goodix.hardware.secure_element_aidl.IGdxEse/default"]
-+description = "/odm/etc/secure_element-service-goodixsp.xml"
-+when = { property = "ro.special_edition", value = "true" }
-+user = "system"
-+groups = ["system"]
-+
-+[[service]]
-+path = "/odm/bin/hw/android.hardware.weaver-service"
-+libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"]
-+ready_service = "android.hardware.weaver.IWeaver/default"
-+when = { property = "ro.special_edition", value = "true" }
-+user = "system"
-+groups = ["system", "drmrpc"]
-+capabilities = ["WAKE_ALARM"]
-+
-+# The boot control, which says which slot the bootloader starts next and
-+# switches it, writing where the bootloader reads it. It comes last: the
-+# phone is usable without it.
-+[[service]]
-+path = "/vendor/bin/hw/android.hardware.boot-service.qti"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+ready_service = "android.hardware.boot.IBootControl/default"
-+user = "root"
-+groups = ["root"]
-+
-+# WLAN: the peach node in the device tree, driven by qca_cld3_peach_v2, the
-+# one Peach driver the phone's own modules.load lists, as on the 17 Ultra.
-+# Its cfg80211 asks for rfkill, one of the kernel's own modules in
-+# system_dlkm. The driver reads its settings and the MAC address through
-+# the firmware loader, from links the vendor partition keeps in its own
-+# firmware folder, into the vendor partition and into persist.
-+# wpa_supplicant runs on the recovery's own libraries before the vendor
-+# partition's, as on the 17 Ultra.
-+
-+[wlan]
-+modules = ["rfkill", "qca_cld3_peach_v2"]
-+writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
-+interface = "wlan0"
-+supplicant = "/vendor/bin/hw/wpa_supplicant"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+service = "android.hardware.wifi.supplicant.ISupplicant/default"
-+probe = "http://connect.rom.miui.com/generate_204"
-+
-+# The update server the stock updater of the Chinese system asks.
-+[update]
-+server = "https://update.miui.com/updates/miotaV3.php"
-+
-+# The stock build the recovery is made on: the Chinese system's
-+# OS3.0.310.0, whose full update package on the phone maker's own download
-+# server holds the recovery partition the recovery is built on top of.
-+[stock]
-+version = "OS3.0.310.0.WAFCNXM"
-+package = "https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS3.0.310.0.WAFCNXM/byron-ota_full-OS3.0.310.0.WAFCNXM-user-16.0-af218e1233.zip"
-+recovery = "da70265665598f9d66e18bfe49d681b33da63d7ddb1a73375e8f1c7433710e25"
-+
-+# qcom-hv-haptics (qcom,hv-haptics in its dtbo), with the click made from
-+# samples at the motor's resonant frequency as on the 17 Ultra. The
-+# strengths are the 17 Ultra's, which were felt on that phone's motor.
-+[haptics]
-+resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
-+strength = { lightest = 0.25, strongest = 0.75 }
 diff -ruN a/vendor/qrcodegen/Cargo.lock b/vendor/qrcodegen/Cargo.lock
 --- a/vendor/qrcodegen/Cargo.lock	1970-01-01 00:00:00.000000000 +0000
 +++ b/vendor/qrcodegen/Cargo.lock	2026-11-17 00:00:00.000000000 +0000
