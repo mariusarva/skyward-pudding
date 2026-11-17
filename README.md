@@ -2,7 +2,7 @@
 
 小米 17（`pudding`，本机系统 OS4.0.6.0.XPCCNXM）可用的 Skyward recovery：**双系统 + data 解密**都能用。
 
-基于 [kirklin/skyward](https://github.com/kirklin/skyward) **v0.3.1**（GPL-3.0）自编译。改动见 `patches/skyward-pudding-v0.3.11.patch`，完整改动清单见 `docs/audit/`。发布公告文案见 `docs/发布公告.md`。
+基于 [kirklin/skyward](https://github.com/kirklin/skyward) **v0.3.1**（GPL-3.0）自编译。改动见 `patches/skyward-pudding-v0.3.12.patch`，完整改动清单见 `docs/audit/`。发布公告文案见 `docs/发布公告.md`。
 
 ## 这一版做了什么
 
@@ -54,7 +54,7 @@
 ```sh
 fastboot devices
 fastboot getvar current-slot                 # 本机是 b
-fastboot flash recovery_b skyward-pudding-20261117-0.3.11-OS4.0.6.0.XPCCNXM.img
+fastboot flash recovery_b skyward-pudding-20261117-0.3.12-OS4.0.6.0.XPCCNXM.img
 fastboot reboot
 adb reboot recovery                          # 从系统进，别用 fastboot reboot recovery
 ```
@@ -66,11 +66,11 @@ adb reboot recovery                          # 从系统进，别用 fastboot re
 ## 校验
 
 ```
-镜像    skyward-pudding-20261117-0.3.11-OS4.0.6.0.XPCCNXM.img  104857600 字节
-sha256  bff267b1f180952250d3a632c3f80956d1897df5c9a2ae837570c8756c266f0c
-md5     3842e2bae5803b953ac10bad3a2d5aa4
-zip     skyward-v0.3.11-pudding-OS4.0.6.0.XPCCNXM.zip  46371378 字节（更新器用）
-sha256  378efe93bad5b392f634c5d258634c7fe22312967e23373bd20a7aa68fa11f30
+镜像    skyward-pudding-20261117-0.3.12-OS4.0.6.0.XPCCNXM.img  104857600 字节
+sha256  d6cf88aa15969799ad09c70b1f2df208af8a283d3ed7e421c0b1d979bfd49511
+md5     aff25823e7b36ba6a7a3d690106e2cc2
+zip     skyward-v0.3.12-pudding-OS4.0.6.0.XPCCNXM.zip  46371250 字节（更新器用）
+sha256  96879021a8e07d2071c260aff9b804e81f604d90768e9196cdfd8d847dcfff76
 ```
 
 ## 从源码重建
@@ -82,7 +82,7 @@ tar xzf skyward.tar.gz
 cd skyward-0.3.1
 
 # 2) 打本仓库的补丁（58 个文件、14 个新增，干跑零失败）
-patch -p1 < ../patches/skyward-pudding-v0.3.11.patch
+patch -p1 < ../patches/skyward-pudding-v0.3.12.patch
 
 # 3) 交叉编译（宿主 aarch64 也能编，见 docs/开发记录.md 的“两个坑”）
 rustup target add aarch64-linux-android
@@ -100,7 +100,7 @@ python3 scripts/avbwrap.py ramdisk.lz4 out.img
 
 - 地址写在 `device.toml` 的 `[update] skyward`，指向 `docs/update.json`（走 `gh-proxy.com` 镜像）
 - 本机实测下载速度：直连 `github.com` 71 KB/s、`ghfast.top` 500 KB/s、`ghproxy.net` 335 KB/s、**`gh-proxy.com` 1.5 MB/s**，取最快的
-- Release 里的 `skyward-v0.3.11-pudding-OS4.0.6.0.XPCCNXM.zip`（只含一个 `.img`）就是更新器要的格式；`docs/update.json` 里的 `digest` 与 `size` 必须和它一致
+- Release 里的 `skyward-v0.3.12-pudding-OS4.0.6.0.XPCCNXM.zip`（只含一个 `.img`）就是更新器要的格式；`docs/update.json` 里的 `digest` 与 `size` 必须和它一致
 - 发新版时：传 zip → 改 `docs/update.json` 的 `tag_name`/`size`/`digest`/URL → 提交。镜像不行就换 `[update] skyward` 的地址，不用重新编译
 
 ## 上游更新了怎么办
