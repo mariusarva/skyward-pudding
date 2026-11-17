@@ -47,82 +47,6 @@ diff -ruN a/Cargo.lock b/Cargo.lock
 +dependencies = [
 + "zune-core",
 +]
-diff -ruN a/build_byron.log b/build_byron.log
---- a/build_byron.log	1970-01-01 00:00:00.000000000 +0000
-+++ b/build_byron.log	2026-11-17 00:00:00.000000000 +0000
-@@ -0,0 +1,72 @@
-+warning: vendor/qrcodegen/Cargo.toml: `package.edition` is unspecified, defaulting to `2015` while the latest is `2024`
-+warning: `qrcodegen` (manifest) generated 1 warning
-+   Compiling skyward-info v0.3.1 (/workspace/项目/第三方REC-pudding/构建/skyward-0.3.1/crates/skyward-info)
-+warning: unnecessary parentheses around block return value
-+   --> vendor/qrcodegen/src/lib.rs:842:3
-+    |
-+842 |         ( i32::from(core && rh[0] >= n * 4 && rh[6] >= n)
-+    |         ^^
-+843 |         + i32::from(core && rh[6] >= n * 4 && rh[0] >= n))
-+    |                                                          ^
-+    |
-+    = note: `#[warn(unused_parens)]` (part of `#[warn(unused)]`) on by default
-+help: remove these parentheses
-+    |
-+842 ~         i32::from(core && rh[0] >= n * 4 && rh[6] >= n)
-+843 ~         + i32::from(core && rh[6] >= n * 4 && rh[0] >= n)
-+    |
-+
-+warning: use of deprecated constant `std::i32::MAX`: replaced by the `MAX` associated constant on this type
-+   --> vendor/qrcodegen/src/lib.rs:304:35
-+    |
-+304 |             let mut minpenalty = std::i32::MAX;
-+    |                                            ^^^
-+    |
-+    = note: `#[warn(deprecated)]` on by default
-+
-+warning: `qrcodegen` (lib) generated 2 warnings (run `cargo fix --lib -p qrcodegen` to apply 1 suggestion)
-+   Compiling skyward-install v0.3.1 (/workspace/项目/第三方REC-pudding/构建/skyward-0.3.1/crates/skyward-install)
-+   Compiling skyward-ui v0.3.1 (/workspace/项目/第三方REC-pudding/构建/skyward-0.3.1/crates/skyward-ui)
-+warning: field `since` is never read
-+    --> crates/skyward-ui/src/app/mod.rs:1138:5
-+     |
-+1137 | struct Lock {
-+     |        ---- field in this struct
-+1138 |     since: u64,
-+     |     ^^^^^
-+     |
-+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
-+
-+warning: `skyward-ui` (lib) generated 1 warning
-+   Compiling skyward v0.3.1 (/workspace/项目/第三方REC-pudding/构建/skyward-0.3.1/crates/skyward)
-+warning: variable does not need to be mutable
-+   --> crates/skyward/src/updates.rs:321:5
-+    |
-+321 |     mut urls: Vec<String>,
-+    |     ----^^^^
-+    |     |
-+    |     help: remove this `mut`
-+    |
-+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
-+
-+warning: variable does not need to be mutable
-+   --> crates/skyward/src/main.rs:594:9
-+    |
-+594 |     let mut services: Vec<Started> = cfg.services.iter().filter(|s| s.runs_on(&props)).cloned().map(Started::from).collect();
-+    |         ----^^^^^^^^
-+    |         |
-+    |         help: remove this `mut`
-+
-+warning: method `fd` is never used
-+  --> crates/skyward/src/fetch.rs:64:12
-+   |
-+34 | impl Worker {
-+   | ----------- method in this implementation
-+...
-+64 |     pub fn fd(&self) -> RawFd {
-+   |            ^^
-+   |
-+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
-+
-+warning: `skyward` (bin "skyward") generated 3 warnings (run `cargo fix --bin "skyward" -p skyward` to apply 2 suggestions)
-+    Finished `release` profile [optimized] target(s) in 18.89s
 diff -ruN a/crates/skyward/src/fetch.rs b/crates/skyward/src/fetch.rs
 --- a/crates/skyward/src/fetch.rs	1970-01-01 00:00:00.000000000 +0000
 +++ b/crates/skyward/src/fetch.rs	2026-11-17 00:00:00.000000000 +0000
@@ -885,7 +809,7 @@ diff -ruN a/crates/skyward/src/input.rs b/crates/skyward/src/input.rs
 -                    fs::write(&w.path, &w.value).with_context(|| format!("write {} to {}", w.value, w.path))?;
 -                    skyward_sys::kmsg(&format!("wrote {} to {} for the touchscreen", w.value, w.path))?;
 +            let _ = skyward_sys::kmsg(&format!("input {}: {:?} direct={direct} multitouch={mt} keys={keys}", path.display(), dev.name().unwrap_or("?")));
-+            // 触摸设备未必被标成 direct：17 Pro 上控制器的属性位与 17 不同，
++            // 触摸设备未必被标成 direct：有些机型的控制器不报这一位，
 +            // 只按 direct+mt 认会把面板漏掉。先把 mt 的都记下，direct 的优先；
 +            // 一直没有 direct 的，就把最后那个 mt 当面板用（下面 take_panel）。
 +            if mt && self.panel.is_none() {
@@ -984,18 +908,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
  mod filework;
  #[cfg(target_os = "android")]
  mod haptics;
-@@ -19,6 +26,10 @@
- mod input;
- #[cfg(target_os = "android")]
- mod keys;
-+/// The service the phone's weaver asks the secure element through, served
-+/// here for a phone whose configuration names this program as its server.
-+#[cfg(target_os = "android")]
-+mod omapi;
- #[cfg(target_os = "android")]
- mod merge;
- #[cfg(target_os = "android")]
-@@ -34,6 +45,8 @@
+@@ -34,6 +41,8 @@
  #[cfg(target_os = "android")]
  mod services;
  #[cfg(target_os = "android")]
@@ -1004,7 +917,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
  mod settings;
  #[cfg(target_os = "android")]
  mod systems;
-@@ -47,6 +60,8 @@
+@@ -47,6 +56,8 @@
  mod wipe;
  #[cfg(target_os = "android")]
  mod wlan;
@@ -1013,18 +926,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
  
  #[derive(Parser)]
  #[command(name = "skyward", version, about = "Skyward recovery")]
-@@ -66,6 +81,10 @@
-     /// Print the suffix of the slot the phone runs from and, where the
-     /// phone's boot control runs, what it holds of each slot.
-     Slot,
-+    /// Serve Android's secure element service, which the phone's weaver asks
-+    /// its slots through and which a recovery does not run.
-+    #[cfg(target_os = "android")]
-+    Omapi,
-     /// List modules in dependency load order from a source directory.
-     Modules {
-         #[arg(long, default_value = "/vendor/lib/modules")]
-@@ -224,6 +243,13 @@
+@@ -224,6 +235,13 @@
  }
  
  fn main() -> Result<()> {
@@ -1038,16 +940,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
      // init starts the recovery service by path with no arguments.
      let started_as = std::env::args_os().next().unwrap_or_default();
      let name = Path::new(&started_as).file_name().unwrap_or_default();
-@@ -298,6 +324,8 @@
-             }
-         }
-         #[cfg(target_os = "android")]
-+        Cmd::Omapi => omapi::serve(),
-+        #[cfg(target_os = "android")]
-         Cmd::Keys => {
-             for line in keys::describe(&keys::found(booted_slot()?, secure::libraries()?.as_deref())?.steps?) {
-                 println!("{line}");
-@@ -518,7 +546,67 @@
+@@ -518,7 +536,67 @@
  /// among the phone's partitions: where what the partitions say could not
  /// be made out, the phone's devices are up before that is said.
  #[cfg(target_os = "android")]
@@ -1115,7 +1008,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
      let nodes = skyward_sys::ueventd::apply()?;
      skyward_sys::kmsg(&format!("{nodes} device nodes given the owner their phone describes"))?;
      let props = skyward_info::installed_props(slot)?;
-@@ -530,7 +618,7 @@
+@@ -530,7 +608,7 @@
      {
          skyward_sys::kmsg(&format!("logd not started: {e:#}"))?;
      }
@@ -1124,7 +1017,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
      // The drivers ask for their firmware by name, and the kernel looks only
      // in folders of its own unless told to pass on what it does not find
      // there to ueventd, which looks in the recovery's firmware folders.
-@@ -542,23 +630,91 @@
+@@ -542,23 +620,77 @@
          let at = skyward_block::fstab::mount(name)?;
          skyward_sys::kmsg(&format!("{name} is mounted on {}", at.display()))?;
      }
@@ -1163,14 +1056,6 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
 +    // started as its partitions say.
 +    let cannot_run_here = cfg.keys.leave_out.clone();
 +    let served = found.as_deref().is_ok_and(keys::serves_elements);
-+    // A phone whose configuration names the program that serves Android's
-+    // secure element service gets that service from it, as its own system
-+    // does: the recovery then leaves the serving to that program, and does
-+    // not register the same name itself.
-+    let serves_elements_itself = services.iter().any(|s| {
-+        s.service.path == skyward_config::ramdisk::CLI
-+            && s.service.ready_service.as_deref() == Some(skyward_omapi::SERVICE)
-+    });
 +    let mut left_out: Vec<String> = Vec::new();
 +    let found = found.map(|steps| {
 +        steps
@@ -1178,13 +1063,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
 +            .filter(|step| match step {
 +                skyward_programs::secure::Step::ServeElements => false,
 +                skyward_programs::secure::Step::Start(program) => {
-+                    // A program the configuration starts itself is not started
-+                    // a second time from what the phone's partitions say: two
-+                    // copies of one key program fight over the same device.
-+                    if services.iter().any(|s| s.service.path == program.service.path) {
-+                        return false;
-+                    }
-+                    let serves = program
++                        let serves = program
 +                        .service
 +                        .ready_service
 +                        .iter()
@@ -1223,12 +1102,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
      let programs = || services.iter().map(|p| &p.service).chain(&key_programs);
      let hardware: Vec<String> = programs().filter_map(|s| s.ready_hardware_service.clone()).collect();
      if !hardware.is_empty() {
-@@ -572,15 +728,66 @@
-     // directory can no longer start again by then: the key service
-     // registers with it below, and nothing would register that again.
-     let mut registering: Vec<String> = programs().flat_map(|s| s.ready_service.iter().chain(&s.registers).cloned()).collect();
--    if found.as_deref().is_ok_and(keys::serves_elements) {
-+    if found.as_deref().is_ok_and(keys::serves_elements) && !serves_elements_itself {
+@@ -576,11 +708,62 @@
          registering.push(skyward_omapi::SERVICE.to_string());
      }
      registering.extend(cfg.wlan.iter().map(|w| w.service.clone()));
@@ -1296,7 +1170,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
      let mut told = registering.clone();
      told.extend(described.into_iter().filter(|name| !registering.contains(name)));
      if !told.is_empty() {
-@@ -589,21 +796,61 @@
+@@ -589,21 +772,61 @@
      }
      let libraries = secure::libraries()?;
      if let Some(dir) = &libraries {
@@ -1366,7 +1240,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
  #[cfg(target_os = "android")]
  fn hand_over(owners: &[skyward_config::Owners]) -> Result<usize> {
      use skyward_sys::ueventd;
-@@ -614,6 +861,8 @@
+@@ -614,6 +837,8 @@
      for run in owners {
          let (uid, gid) = (id(&run.user)?, id(&run.group)?);
          for path in &run.paths {
@@ -1375,7 +1249,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
              std::os::unix::fs::chown(path, Some(uid), Some(gid)).with_context(|| format!("give {path} to {}:{}", run.user, run.group))?;
              std::fs::set_permissions(path, std::fs::Permissions::from_mode(run.mode))
                  .with_context(|| format!("give {path} the mode {:o}", run.mode))?;
-@@ -754,10 +1003,14 @@
+@@ -754,10 +979,14 @@
              bcb::clear(&misc)?;
          }
          let cfg = DeviceConfig::load(Path::new("/").join(ramdisk::CONFIG))?;
@@ -1391,32 +1265,19 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
              message.command,
              message.args,
              request.work
-@@ -806,12 +1059,44 @@
+@@ -806,12 +1035,32 @@
              // partitions the system asks for, as in Android's own recovery:
              // erasing them, which may take super with them, and undoing
              // shared blocks, which writes to the slot's own.
 -            let mut programs = cfg.services.clone();
--            if !matches!(request.work, bcb::Work::Fastboot | bcb::Work::WipeAb { .. } | bcb::Work::UnshareBlocks) {
--                programs.extend(prepare(&cfg, booted_slot()?)?);
 +            let programs = cfg.services.clone();
 +            // The screen comes up first: mapping super, mounting the slot's
 +            // partitions, loading the drivers and starting the phone's own
 +            // services takes seconds, and until the screen is drawn the phone
 +            // looks stuck. What needs them waits for them instead: a page calls
 +            // `wait_prepared` before it does.
-+            if !matches!(request.work, bcb::Work::Fastboot | bcb::Work::WipeAb { .. } | bcb::Work::UnshareBlocks)
-+                && cfg.device.parts_before_screen
-+            {
-+                // 这台手机的触摸与按键要等驱动装载出来才存在，所以先把手机
-+                // 自己的部件带起来，再画第一帧。
-+                let done = booted_slot()
-+                    .map_err(|e| anyhow::anyhow!("{e:#}"))
-+                    .and_then(|slot| prepare(&cfg, slot));
-+                if let Err(e) = done {
-+                    skyward_sys::kmsg(&format!("devices not brought up: {e:#}"))?;
-+                }
-+                mark_prepared();
-+            } else if !matches!(request.work, bcb::Work::Fastboot | bcb::Work::WipeAb { .. } | bcb::Work::UnshareBlocks) {
+             if !matches!(request.work, bcb::Work::Fastboot | bcb::Work::WipeAb { .. } | bcb::Work::UnshareBlocks) {
+-                programs.extend(prepare(&cfg, booted_slot()?)?);
 +                let prepared_cfg = cfg.clone();
 +                let spawned = std::thread::Builder::new().name("prepare".into()).spawn(move || {
 +                    let done = booted_slot()
@@ -1440,7 +1301,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
          }
          #[cfg(not(target_os = "android"))]
          {
-@@ -830,22 +1115,39 @@
+@@ -830,22 +1079,39 @@
  /// reason goes to the kernel log instead.
  #[cfg(target_os = "android")]
  fn prepare(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<Vec<skyward_config::Service>> {
@@ -1483,7 +1344,7 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
              Ok(programs)
          }
          Err(e) => {
-@@ -871,7 +1173,7 @@
+@@ -871,7 +1137,7 @@
      println!("storage       = {} bytes, free {:?}", i.storage.total, i.storage.free);
      println!("battery       = {:?}", i.battery);
      println!("boot          = {:?}", i.boot);
@@ -1492,776 +1353,6 @@ diff -ruN a/crates/skyward/src/main.rs b/crates/skyward/src/main.rs
      match i.slot {
          Some(s) => println!("current_slot  = {}", s.suffix()),
          None => println!("current_slot  = (not A/B)"),
-diff -ruN a/crates/skyward/src/omapi.rs b/crates/skyward/src/omapi.rs
---- a/crates/skyward/src/omapi.rs	1970-01-01 00:00:00.000000000 +0000
-+++ b/crates/skyward/src/omapi.rs	2026-11-17 00:00:00.000000000 +0000
-@@ -0,0 +1,766 @@
-+//! The service the phone's weaver asks the secure element through. Android
-+//! keeps it in its framework, which a recovery runs none of, so the few
-+//! calls the weaver makes are served here, over the secure element HAL the
-+//! phone's own partitions carry: the framework's own service is a reader
-+//! over that HAL, and so is this one.
-+
-+use anyhow::{bail, Context, Result};
-+use std::ffi::{c_char, c_void, CStr, CString};
-+use std::ptr::{null, null_mut};
-+use std::sync::atomic::{AtomicBool, Ordering};
-+use std::sync::{Mutex, OnceLock};
-+
-+/// The name the phone's weaver looks the service up by.
-+pub const SERVICE: &str = "android.se.omapi.ISecureElementService/default";
-+
-+/// The secure element the weaver's slots are in.
-+const ELEMENT: &str = "android.hardware.secure_element.ISecureElement/eSE1";
-+
-+/// The reader this service offers, named as Android names the phone's own
-+/// embedded secure element.
-+const READER: &str = "eSE1";
-+
-+type Status = i32;
-+type Code = u32;
-+
-+const OK: Status = 0;
-+const UNKNOWN_TRANSACTION: Status = -2;
-+
-+/// What every AIDL reply opens with when the call went through.
-+const NO_EXCEPTION: i32 = 0;
-+
-+#[repr(C)]
-+struct Class {
-+    _private: [u8; 0],
-+}
-+
-+#[repr(C)]
-+struct Binder {
-+    _private: [u8; 0],
-+}
-+
-+#[repr(C)]
-+struct Parcel {
-+    _private: [u8; 0],
-+}
-+
-+type OnCreate = extern "C" fn(*mut c_void) -> *mut c_void;
-+type OnDestroy = extern "C" fn(*mut c_void);
-+type OnTransact = extern "C" fn(*mut Binder, Code, *const Parcel, *mut Parcel) -> Status;
-+type StringAllocator = extern "C" fn(*mut c_void, i32, *mut *mut c_char) -> bool;
-+type ArrayAllocator = extern "C" fn(*mut c_void, i32, *mut *mut i8) -> bool;
-+
-+/// The calls of the phone's own binder library, which is the one its own
-+/// services were built against. It is opened by path: the recovery's own
-+/// smaller copy of that library cannot take a call, only make one.
-+struct Api {
-+    class_define: unsafe extern "C" fn(*const c_char, OnCreate, OnDestroy, OnTransact) -> *mut Class,
-+    new_binder: unsafe extern "C" fn(*const Class, *mut c_void) -> *mut Binder,
-+    dec: unsafe extern "C" fn(*mut Binder),
-+    user_data: unsafe extern "C" fn(*mut Binder) -> *mut c_void,
-+    associate: unsafe extern "C" fn(*mut Binder, *const Class) -> bool,
-+    add_service: unsafe extern "C" fn(*mut Binder, *const c_char) -> Status,
-+    get_service: unsafe extern "C" fn(*const c_char) -> *mut Binder,
-+    prepare: unsafe extern "C" fn(*mut Binder, *mut *mut Parcel) -> Status,
-+    transact: unsafe extern "C" fn(*mut Binder, Code, *mut *mut Parcel, *mut *mut Parcel, u32) -> Status,
-+    set_threads: unsafe extern "C" fn(u32) -> bool,
-+    join: unsafe extern "C" fn(),
-+    delete: unsafe extern "C" fn(*mut Parcel),
-+    write_i32: unsafe extern "C" fn(*mut Parcel, i32) -> Status,
-+    read_i32: unsafe extern "C" fn(*const Parcel, *mut i32) -> Status,
-+    write_bool: unsafe extern "C" fn(*mut Parcel, bool) -> Status,
-+    read_bool: unsafe extern "C" fn(*const Parcel, *mut bool) -> Status,
-+    write_byte: unsafe extern "C" fn(*mut Parcel, i8) -> Status,
-+    read_byte: unsafe extern "C" fn(*const Parcel, *mut i8) -> Status,
-+    write_string: unsafe extern "C" fn(*mut Parcel, *const c_char, i32) -> Status,
-+    read_string: unsafe extern "C" fn(*const Parcel, *mut c_void, StringAllocator) -> Status,
-+    write_array: unsafe extern "C" fn(*mut Parcel, *const i8, i32) -> Status,
-+    read_array: unsafe extern "C" fn(*const Parcel, *mut c_void, ArrayAllocator) -> Status,
-+    write_binder: unsafe extern "C" fn(*mut Parcel, *mut Binder) -> Status,
-+    vendor_stability: unsafe extern "C" fn(*mut Binder),
-+}
-+
-+/// The classes the phone's binder library knows this process's objects by.
-+struct Classes {
-+    service: *mut Class,
-+    reader: *mut Class,
-+    session: *mut Class,
-+    channel: *mut Class,
-+    element: *mut Class,
-+    callback: *mut Class,
-+}
-+
-+unsafe impl Send for Classes {}
-+unsafe impl Sync for Classes {}
-+
-+static API: OnceLock<Api> = OnceLock::new();
-+static CLASSES: OnceLock<Classes> = OnceLock::new();
-+static HAL: OnceLock<std::result::Result<Hal, String>> = OnceLock::new();
-+
-+pub fn serve() -> Result<()> {
-+    let loaded = Api::load().context("open the phone's own binder library")?;
-+    let defined = Classes::define(&loaded)?;
-+    let _ = API.set(loaded);
-+    let _ = CLASSES.set(defined);
-+    let api = api();
-+    let service = unsafe { (api.new_binder)(classes().service, null_mut()) };
-+    if service.is_null() {
-+        bail!("make the OMAPI service");
-+    }
-+    // The phone's weaver is a vendor program, and a vendor program may only
-+    // call a service marked vendor: what this process makes is marked system
-+    // unless told otherwise.
-+    unsafe { (api.vendor_stability)(service) };
-+    let name = CString::new(SERVICE)?;
-+    let status = unsafe { (api.add_service)(service, name.as_ptr()) };
-+    if status != OK {
-+        bail!("register {SERVICE}: the service directory answered {status}");
-+    }
-+    skyward_sys::kmsg(&format!("omapi: {SERVICE} is registered"))?;
-+    let _ = unsafe { (api.set_threads)(1) };
-+    unsafe { (api.join)() };
-+    Ok(())
-+}
-+
-+fn api() -> &'static Api {
-+    API.get().expect("the binder library is opened before any call arrives")
-+}
-+
-+fn classes() -> &'static Classes {
-+    CLASSES.get().expect("the classes are defined before any call arrives")
-+}
-+
-+impl Api {
-+    fn load() -> Result<Api> {
-+        let library = open()?;
-+        Ok(Api {
-+            class_define: symbol(library, "AIBinder_Class_define")?,
-+            new_binder: symbol(library, "AIBinder_new")?,
-+            dec: symbol(library, "AIBinder_decStrong")?,
-+            user_data: symbol(library, "AIBinder_getUserData")?,
-+            associate: symbol(library, "AIBinder_associateClass")?,
-+            add_service: symbol(library, "AServiceManager_addService")?,
-+            get_service: symbol(library, "AServiceManager_getService")?,
-+            prepare: symbol(library, "AIBinder_prepareTransaction")?,
-+            transact: symbol(library, "AIBinder_transact")?,
-+            set_threads: symbol(library, "ABinderProcess_setThreadPoolMaxThreadCount")?,
-+            join: symbol(library, "ABinderProcess_joinThreadPool")?,
-+            delete: symbol(library, "AParcel_delete")?,
-+            write_i32: symbol(library, "AParcel_writeInt32")?,
-+            read_i32: symbol(library, "AParcel_readInt32")?,
-+            write_bool: symbol(library, "AParcel_writeBool")?,
-+            read_bool: symbol(library, "AParcel_readBool")?,
-+            write_byte: symbol(library, "AParcel_writeByte")?,
-+            read_byte: symbol(library, "AParcel_readByte")?,
-+            write_string: symbol(library, "AParcel_writeString")?,
-+            read_string: symbol(library, "AParcel_readString")?,
-+            write_array: symbol(library, "AParcel_writeByteArray")?,
-+            read_array: symbol(library, "AParcel_readByteArray")?,
-+            write_binder: symbol(library, "AParcel_writeStrongBinder")?,
-+            vendor_stability: symbol(library, "AIBinder_forceDowngradeToVendorStability")?,
-+        })
-+    }
-+}
-+
-+fn open() -> Result<*mut c_void> {
-+    // The program's own libraries are searched first, which is where the
-+    // installed system's copy is, then the places it is kept by path: a
-+    // recovery's own copy of it cannot take a call.
-+    const NAMES: [&str; 4] = [
-+        "libbinder_ndk.so",
-+        "/mnt/system/system/lib64/libbinder_ndk.so",
-+        "/vendor/lib64/libbinder_ndk.so",
-+        "/system/lib64/libbinder_ndk.so",
-+    ];
-+    for name in NAMES {
-+        if name.starts_with('/') && !std::path::Path::new(name).is_file() {
-+            continue;
-+        }
-+        let asked = CString::new(name)?;
-+        let handle = unsafe { libc::dlopen(asked.as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL) };
-+        if !handle.is_null() {
-+            return Ok(handle);
-+        }
-+    }
-+    bail!("the installed system carries no binder library that opens: {}", last_error());
-+}
-+
-+fn last_error() -> String {
-+    let why = unsafe { libc::dlerror() };
-+    if why.is_null() {
-+        return String::new();
-+    }
-+    unsafe { CStr::from_ptr(why) }.to_string_lossy().into_owned()
-+}
-+
-+fn symbol<T: Copy>(library: *mut c_void, name: &str) -> Result<T> {
-+    let asked = CString::new(name)?;
-+    // SAFETY: `library` is the handle `open` returned, which stays open for
-+    // as long as the program runs, and the symbol it holds is of the type
-+    // `T` the caller names, as the binder library declares it.
-+    let found = unsafe { libc::dlsym(library, asked.as_ptr()) };
-+    if found.is_null() {
-+        bail!("the phone's binder library holds no {name}");
-+    }
-+    Ok(unsafe { std::mem::transmute_copy(&found) })
-+}
-+
-+impl Classes {
-+    fn define(api: &Api) -> Result<Classes> {
-+        let define = |descriptor: &str, create: OnCreate, destroy: OnDestroy, transact: OnTransact| -> Result<*mut Class> {
-+            let name = CString::new(descriptor)?;
-+            let class = unsafe { (api.class_define)(name.as_ptr(), create, destroy, transact) };
-+            if class.is_null() {
-+                bail!("define {descriptor}");
-+            }
-+            Ok(class)
-+        };
-+        Ok(Classes {
-+            service: define("android.se.omapi.ISecureElementService", no_create, no_destroy, service_transact)?,
-+            reader: define("android.se.omapi.ISecureElementReader", no_create, no_destroy, reader_transact)?,
-+            session: define("android.se.omapi.ISecureElementSession", keep, free_session, session_transact)?,
-+            channel: define("android.se.omapi.ISecureElementChannel", keep, free_channel, channel_transact)?,
-+            element: define("android.hardware.secure_element.ISecureElement", no_create, no_destroy, element_transact)?,
-+            callback: define("android.hardware.secure_element.ISecureElementCallback", no_create, no_destroy, callback_transact)?,
-+        })
-+    }
-+}
-+
-+/// The state of an open session: the channels it has opened, and whether it
-+/// has been closed.
-+struct Session {
-+    closed: AtomicBool,
-+    channels: Mutex<Vec<u8>>,
-+}
-+
-+/// The state of a channel the weaver transmits on.
-+struct Channel {
-+    number: u8,
-+    basic: bool,
-+    select: Option<Vec<u8>>,
-+    closed: AtomicBool,
-+}
-+
-+/// The phone's secure element, as the phone's own HAL serves it.
-+struct Hal {
-+    element: *mut Binder,
-+    /// The callback the HAL reports the card's coming and going through,
-+    /// kept for as long as the HAL is used.
-+    #[allow(dead_code)]
-+    _callback: *mut Binder,
-+}
-+
-+unsafe impl Send for Hal {}
-+unsafe impl Sync for Hal {}
-+
-+fn element() -> Result<&'static Hal> {
-+    match HAL.get_or_init(|| start_element().map_err(|e| format!("{e:#}"))) {
-+        Ok(hal) => Ok(hal),
-+        Err(why) => bail!("{why}"),
-+    }
-+}
-+
-+fn start_element() -> Result<Hal> {
-+    let api = api();
-+    let name = CString::new(ELEMENT)?;
-+    let element = unsafe { (api.get_service)(name.as_ptr()) };
-+    if element.is_null() {
-+        bail!("{ELEMENT} is not running");
-+    }
-+    if !unsafe { (api.associate)(element, classes().element) } {
-+        bail!("the secure element will not take the interface it is named by");
-+    }
-+    let callback = unsafe { (api.new_binder)(classes().callback, null_mut()) };
-+    if callback.is_null() {
-+        bail!("make the secure element's callback");
-+    }
-+    let callback = vendor(callback);
-+    let hal = Hal { element, _callback: callback };
-+    let _ = hal.call(3, |parcel| unsafe { (api.write_binder)(parcel, callback) })?;
-+    Ok(hal)
-+}
-+
-+impl Hal {
-+    fn call(&self, code: Code, write: impl FnOnce(*mut Parcel) -> Status) -> Result<Option<*mut Parcel>> {
-+        let Some(answer) = call(self.element, code, write)? else { return Ok(None) };
-+        // Every reply opens with the mark that says how the call ended,
-+        // which is read before what the call answered.
-+        if let Err(e) = went_through(answer) {
-+            unsafe { (api().delete)(answer) };
-+            return Err(e);
-+        }
-+        Ok(Some(answer))
-+    }
-+
-+    fn get_atr(&self) -> Result<Option<Vec<u8>>> {
-+        let answer = self.call(2, |_| OK)?.context("the secure element answered nothing for its ATR")?;
-+        let atr = read_bytes(answer);
-+        unsafe { (api().delete)(answer) };
-+        atr
-+    }
-+
-+    fn is_card_present(&self) -> Result<bool> {
-+        let answer = self.call(4, |_| OK)?.context("the secure element answered nothing about its card")?;
-+        let present = read_bool(answer);
-+        unsafe { (api().delete)(answer) };
-+        Ok(present)
-+    }
-+
-+    fn open_basic(&self, aid: Option<&[u8]>, p2: i8) -> Result<Option<Vec<u8>>> {
-+        let answer = self
-+            .call(5, |parcel| {
-+                let status = write_bytes(parcel, aid);
-+                if status != OK {
-+                    return status;
-+                }
-+                unsafe { (api().write_byte)(parcel, p2) }
-+            })?
-+            .context("the secure element answered nothing for a basic channel")?;
-+        let select = read_bytes(answer);
-+        unsafe { (api().delete)(answer) };
-+        select
-+    }
-+
-+    fn open_logical(&self, aid: Option<&[u8]>, p2: i8) -> Result<(u8, Option<Vec<u8>>)> {
-+        let answer = self
-+            .call(6, |parcel| {
-+                let status = write_bytes(parcel, aid);
-+                if status != OK {
-+                    return status;
-+                }
-+                unsafe { (api().write_byte)(parcel, p2) }
-+            })?
-+            .context("the secure element answered nothing for a logical channel")?;
-+        let opened = read_logical(answer);
-+        unsafe { (api().delete)(answer) };
-+        opened
-+    }
-+
-+    fn transmit(&self, data: Option<&[u8]>) -> Result<Option<Vec<u8>>> {
-+        let answer = self.call(8, |parcel| write_bytes(parcel, data))?.context("the secure element answered nothing")?;
-+        let reply = read_bytes(answer);
-+        unsafe { (api().delete)(answer) };
-+        reply
-+    }
-+
-+    fn close_channel(&self, number: u8) -> Result<()> {
-+        if let Some(answer) = self.call(1, |parcel| unsafe { (api().write_byte)(parcel, number as i8) })? {
-+            unsafe { (api().delete)(answer) };
-+        }
-+        Ok(())
-+    }
-+
-+    fn reset(&self) -> Result<()> {
-+        if let Some(answer) = self.call(7, |_| OK)? {
-+            unsafe { (api().delete)(answer) };
-+        }
-+        Ok(())
-+    }
-+}
-+
-+fn call(on: *mut Binder, code: Code, write: impl FnOnce(*mut Parcel) -> Status) -> Result<Option<*mut Parcel>> {
-+    let api = api();
-+    let mut input: *mut Parcel = null_mut();
-+    let status = unsafe { (api.prepare)(on, &mut input) };
-+    if status != OK {
-+        bail!("prepare a call to the secure element: {status}");
-+    }
-+    let written = write(input);
-+    if written != OK {
-+        unsafe { (api.delete)(input) };
-+        bail!("write a call to the secure element: {written}");
-+    }
-+    let mut output: *mut Parcel = null_mut();
-+    let status = unsafe { (api.transact)(on, code, &mut input, &mut output, 0) };
-+    if status != OK {
-+        bail!("the secure element answered {status}");
-+    }
-+    Ok((!output.is_null()).then_some(output))
-+}
-+
-+extern "C" fn no_create(_args: *mut c_void) -> *mut c_void {
-+    null_mut()
-+}
-+
-+extern "C" fn no_destroy(_state: *mut c_void) {}
-+
-+extern "C" fn keep(state: *mut c_void) -> *mut c_void {
-+    state
-+}
-+
-+extern "C" fn free_session(state: *mut c_void) {
-+    if !state.is_null() {
-+        unsafe { drop(Box::from_raw(state as *mut Session)) };
-+    }
-+}
-+
-+extern "C" fn free_channel(state: *mut c_void) {
-+    if !state.is_null() {
-+        unsafe { drop(Box::from_raw(state as *mut Channel)) };
-+    }
-+}
-+
-+extern "C" fn service_transact(_binder: *mut Binder, code: Code, input: *const Parcel, output: *mut Parcel) -> Status {
-+    let api = api();
-+    match code {
-+        1 => {
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            let status = unsafe { (api.write_i32)(output, 1) };
-+            if status == OK {
-+                write_text(output, READER)
-+            } else {
-+                status
-+            }
-+        }
-+        2 => {
-+            let name = match read_text(input) {
-+                Ok(name) => name,
-+                Err(_) => return UNKNOWN_TRANSACTION,
-+            };
-+            let reader = match name.as_deref() {
-+                Some(name) if name == READER => unsafe { (api.new_binder)(classes().reader, null_mut()) },
-+                _ => null_mut(),
-+            };
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            give(output, vendor(reader))
-+        }
-+        3 => {
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            // A recovery offers no applet events to any package: no packages
-+            // are allowed, which is a missing list rather than an empty one.
-+            unsafe { (api.write_i32)(output, -1) }
-+        }
-+        _ => UNKNOWN_TRANSACTION,
-+    }
-+}
-+
-+extern "C" fn reader_transact(_binder: *mut Binder, code: Code, _input: *const Parcel, output: *mut Parcel) -> Status {
-+    let api = api();
-+    match code {
-+        1 => {
-+            let present = element().and_then(|hal| hal.is_card_present()).unwrap_or(false);
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            unsafe { (api.write_bool)(output, present) }
-+        }
-+        2 => {
-+            let session = Box::into_raw(Box::new(Session { closed: AtomicBool::new(false), channels: Mutex::new(Vec::new()) }));
-+            let binder = unsafe { (api.new_binder)(classes().session, session as *mut c_void) };
-+            if binder.is_null() {
-+                unsafe { drop(Box::from_raw(session)) };
-+            }
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            give(output, vendor(binder))
-+        }
-+        3 => through(output),
-+        4 => {
-+            let reset = element().and_then(|hal| hal.reset()).is_ok();
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            unsafe { (api.write_bool)(output, reset) }
-+        }
-+        _ => UNKNOWN_TRANSACTION,
-+    }
-+}
-+
-+extern "C" fn session_transact(binder: *mut Binder, code: Code, input: *const Parcel, output: *mut Parcel) -> Status {
-+    let api = api();
-+    let state = unsafe { (api.user_data)(binder) as *mut Session };
-+    if state.is_null() {
-+        return UNKNOWN_TRANSACTION;
-+    }
-+    let session = unsafe { &*state };
-+    match code {
-+        1 => {
-+            let atr = element().and_then(|hal| hal.get_atr()).unwrap_or_default();
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            write_bytes(output, atr.as_deref())
-+        }
-+        2 | 3 => {
-+            close_channels(session);
-+            through(output)
-+        }
-+        4 => {
-+            let closed = session.closed.load(Ordering::SeqCst);
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            unsafe { (api.write_bool)(output, closed) }
-+        }
-+        5 | 6 => {
-+            let aid = read_bytes(input).unwrap_or_default();
-+            let p2 = read_byte(input);
-+            let opened = match code {
-+                5 => element().and_then(|hal| hal.open_basic(aid.as_deref(), p2)).map(|select| (0, true, select)),
-+                _ => element().and_then(|hal| hal.open_logical(aid.as_deref(), p2)).map(|(number, select)| (number, false, select)),
-+            };
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            match opened {
-+                Ok((number, basic, select)) => make_channel(output, number, basic, select),
-+                Err(_) => give(output, null_mut()),
-+            }
-+        }
-+        _ => UNKNOWN_TRANSACTION,
-+    }
-+}
-+
-+extern "C" fn channel_transact(binder: *mut Binder, code: Code, input: *const Parcel, output: *mut Parcel) -> Status {
-+    let api = api();
-+    let state = unsafe { (api.user_data)(binder) as *mut Channel };
-+    if state.is_null() {
-+        return UNKNOWN_TRANSACTION;
-+    }
-+    let channel = unsafe { &*state };
-+    match code {
-+        1 => {
-+            if !channel.closed.swap(true, Ordering::SeqCst) {
-+                let _ = element().and_then(|hal| hal.close_channel(channel.number));
-+            }
-+            through(output)
-+        }
-+        2 => {
-+            let closed = channel.closed.load(Ordering::SeqCst);
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            unsafe { (api.write_bool)(output, closed) }
-+        }
-+        3 => {
-+            let basic = channel.basic;
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            unsafe { (api.write_bool)(output, basic) }
-+        }
-+        4 => {
-+            let select = channel.select.clone();
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            write_bytes(output, select.as_deref())
-+        }
-+        5 => {
-+            let mut data = read_bytes(input).unwrap_or_default();
-+            if let Some(cla) = data.as_mut().and_then(|apdu| apdu.first_mut()) {
-+                *cla = with_channel(*cla, channel.number);
-+            }
-+            let reply = element().and_then(|hal| hal.transmit(data.as_deref())).unwrap_or_default();
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            write_bytes(output, reply.as_deref())
-+        }
-+        6 => {
-+            let status = through(output);
-+            if status != OK {
-+                return status;
-+            }
-+            unsafe { (api.write_bool)(output, false) }
-+        }
-+        _ => UNKNOWN_TRANSACTION,
-+    }
-+}
-+
-+extern "C" fn callback_transact(_binder: *mut Binder, _code: Code, _input: *const Parcel, output: *mut Parcel) -> Status {
-+    through(output)
-+}
-+
-+/// The class of the secure element itself is only used to name the
-+/// interface the phone's own HAL serves; no call arrives on it here.
-+extern "C" fn element_transact(_binder: *mut Binder, _code: Code, _input: *const Parcel, _output: *mut Parcel) -> Status {
-+    UNKNOWN_TRANSACTION
-+}
-+
-+fn make_channel(output: *mut Parcel, number: u8, basic: bool, select: Option<Vec<u8>>) -> Status {
-+    let channel = Box::into_raw(Box::new(Channel { number, basic, select, closed: AtomicBool::new(false) }));
-+    let binder = unsafe { (api().new_binder)(classes().channel, channel as *mut c_void) };
-+    if binder.is_null() {
-+        unsafe { drop(Box::from_raw(channel)) };
-+    }
-+    give(output, vendor(binder))
-+}
-+
-+/// Read the mark a reply opens with, which says whether the call went
-+/// through, and give why it did not where it did not.
-+fn went_through(parcel: *const Parcel) -> Result<()> {
-+    let mut exception: i32 = 0;
-+    let status = unsafe { (api().read_i32)(parcel, &mut exception) };
-+    if status != OK {
-+        bail!("read how the call ended: {status}");
-+    }
-+    match exception {
-+        NO_EXCEPTION => Ok(()),
-+        other => bail!("the call ended in exception {other}"),
-+    }
-+}
-+
-+/// Open a reply with the mark that says the call went through: every AIDL
-+/// reply starts with it, and a client reads what follows as that mark.
-+fn through(output: *mut Parcel) -> Status {
-+    unsafe { (api().write_i32)(output, NO_EXCEPTION) }
-+}
-+
-+/// Mark a binder this process made as one a vendor program may call: what
-+/// it makes is marked system until told otherwise, and the phone's weaver,
-+/// which is a vendor program, is refused a system one.
-+fn vendor(binder: *mut Binder) -> *mut Binder {
-+    if !binder.is_null() {
-+        unsafe { (api().vendor_stability)(binder) };
-+    }
-+    binder
-+}
-+
-+/// `cla` with the channel's number in the bits that carry it, as Android's
-+/// OMAPI service sets it before it sends an APDU: the card is told which
-+/// channel a command belongs to there, and answering nothing to a command
-+/// for a channel on which nothing is selected is what a timeout is.
-+fn with_channel(cla: u8, channel: u8) -> u8 {
-+    if channel < 4 {
-+        (cla & 0xBC) | channel
-+    } else {
-+        let secure_messaging = cla & 0x0C != 0;
-+        let mut cla = (cla & 0xB0) | 0x40 | (channel - 4);
-+        if secure_messaging {
-+            cla |= 0x20;
-+        }
-+        cla
-+    }
-+}
-+
-+fn close_channels(session: &Session) {
-+    let channels = session.channels.lock().expect("no panic holds a session's channels");
-+    if let Ok(hal) = element() {
-+        for number in channels.iter() {
-+            let _ = hal.close_channel(*number);
-+        }
-+    }
-+    session.closed.store(true, Ordering::SeqCst);
-+}
-+
-+fn give(parcel: *mut Parcel, binder: *mut Binder) -> Status {
-+    let status = unsafe { (api().write_binder)(parcel, binder) };
-+    if !binder.is_null() {
-+        unsafe { (api().dec)(binder) };
-+    }
-+    status
-+}
-+
-+fn write_text(parcel: *mut Parcel, text: &str) -> Status {
-+    let Ok(name) = CString::new(text) else {
-+        return UNKNOWN_TRANSACTION;
-+    };
-+    unsafe { (api().write_string)(parcel, name.as_ptr(), text.len() as i32) }
-+}
-+
-+fn write_bytes(parcel: *mut Parcel, bytes: Option<&[u8]>) -> Status {
-+    match bytes {
-+        Some(bytes) => unsafe { (api().write_array)(parcel, bytes.as_ptr().cast(), bytes.len() as i32) },
-+        None => unsafe { (api().write_array)(parcel, null(), -1) },
-+    }
-+}
-+
-+fn read_text(parcel: *const Parcel) -> Result<Option<String>> {
-+    extern "C" fn allocate(data: *mut c_void, length: i32, buffer: *mut *mut c_char) -> bool {
-+        let out = unsafe { &mut *(data as *mut Option<Vec<u8>>) };
-+        if length < 0 {
-+            *out = None;
-+            return true;
-+        }
-+        let mut bytes = vec![0u8; length as usize];
-+        unsafe { *buffer = bytes.as_mut_ptr().cast() };
-+        *out = Some(bytes);
-+        true
-+    }
-+    let mut bytes: Option<Vec<u8>> = None;
-+    let status = unsafe { (api().read_string)(parcel, &mut bytes as *mut _ as *mut c_void, allocate) };
-+    if status != OK {
-+        bail!("read text: {status}");
-+    }
-+    Ok(bytes.map(|bytes| unsafe { CStr::from_ptr(bytes.as_ptr().cast()) }.to_string_lossy().into_owned()))
-+}
-+
-+fn read_bytes(parcel: *const Parcel) -> Result<Option<Vec<u8>>> {
-+    extern "C" fn allocate(data: *mut c_void, length: i32, buffer: *mut *mut i8) -> bool {
-+        let out = unsafe { &mut *(data as *mut Option<Vec<u8>>) };
-+        if length < 0 {
-+            *out = None;
-+            return true;
-+        }
-+        let mut bytes = vec![0u8; length as usize];
-+        unsafe { *buffer = bytes.as_mut_ptr().cast() };
-+        *out = Some(bytes);
-+        true
-+    }
-+    let mut bytes: Option<Vec<u8>> = None;
-+    let status = unsafe { (api().read_array)(parcel, &mut bytes as *mut _ as *mut c_void, allocate) };
-+    if status != OK {
-+        bail!("read bytes: {status}");
-+    }
-+    Ok(bytes)
-+}
-+
-+fn read_byte(parcel: *const Parcel) -> i8 {
-+    let mut value: i8 = 0;
-+    let status = unsafe { (api().read_byte)(parcel, &mut value) };
-+    if status == OK {
-+        value
-+    } else {
-+        0
-+    }
-+}
-+
-+fn read_bool(parcel: *const Parcel) -> bool {
-+    let mut value = false;
-+    let status = unsafe { (api().read_bool)(parcel, &mut value) };
-+    status == OK && value
-+}
-+
-+fn read_logical(parcel: *const Parcel) -> Result<(u8, Option<Vec<u8>>)> {
-+    let api = api();
-+    let mut present: i32 = 0;
-+    let status = unsafe { (api.read_i32)(parcel, &mut present) };
-+    if status != OK {
-+        bail!("read whether the channel is there: {status}");
-+    }
-+    if present == 0 {
-+        bail!("the secure element left the channel out");
-+    }
-+    let mut size: i32 = 0;
-+    let status = unsafe { (api.read_i32)(parcel, &mut size) };
-+    if status != OK {
-+        bail!("read how long the channel is: {status}");
-+    }
-+    let mut number: i8 = 0;
-+    let status = unsafe { (api.read_byte)(parcel, &mut number) };
-+    if status != OK {
-+        bail!("read the channel's number: {status}");
-+    }
-+    Ok((number as u8, read_bytes(parcel)?))
-+}
 diff -ruN a/crates/skyward/src/portal.rs b/crates/skyward/src/portal.rs
 --- a/crates/skyward/src/portal.rs	1970-01-01 00:00:00.000000000 +0000
 +++ b/crates/skyward/src/portal.rs	2026-11-17 00:00:00.000000000 +0000
@@ -2590,7 +1681,7 @@ diff -ruN a/crates/skyward/src/secure.rs b/crates/skyward/src/secure.rs
 +        // a process that never left would have this read the one already
 +        // there as the new one, and the descriptions would never be read.
 +        // 手起只在目录的服务是 `disabled` 时才成立（pudding 就是那样）。
-+        // 别的机型（17 Pro）这份服务不是 disabled，`ctl.start` 会被 init 拒
++        // 有些机型这份服务不是 disabled，`ctl.start` 会被 init 拒
 +        // 掉 —— 那时退回 `ctl.restart`，否则整个 bring_up 在这里就断了，
 +        // 密钥程序一个都不会起，解密只会报 keymint 没在跑。
 +        let by_hand = gone && skyward_sys::set_prop("ctl.start", DIRECTORY_SERVICE).is_ok();
@@ -2919,15 +2010,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
      /// Asking the update server, and downloading the full package.
      checker: Option<updates::Worker>,
      downloader: Option<updates::Worker>,
-@@ -1340,6 +1432,7 @@
-         // partitions in both slots, which a switch writes.
-         let by_name = Path::new(skyward_block::BY_NAME);
-         let both = |base: &str| -> Result<bool> { Ok(by_name.join(format!("{base}_a")).try_exists()? && by_name.join(format!("{base}_b")).try_exists()?) };
-+        app.state.updates = cfg.device.update;
-         app.state.recovery_partitions = both("recovery")?;
-         app.state.dual_boot = app.state.recovery_partitions && both("boot")? && both("init_boot")?;
-         // The second system's work; the systems are read at once, for the home
-@@ -1365,6 +1458,15 @@
+@@ -1365,6 +1457,15 @@
                  app.report(&format!("{e:#}"), monotonic_ms());
              }
          }
@@ -2943,7 +2026,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          Ok(Pages {
              cfg,
              programs,
-@@ -1405,7 +1507,12 @@
+@@ -1405,7 +1506,12 @@
              erase_leaves: false,
              rescue_erasing: false,
              decryptor: None,
@@ -2956,7 +2039,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              part_worker: None,
              worker: None,
              relabeler: None,
-@@ -1414,9 +1521,25 @@
+@@ -1414,9 +1520,25 @@
              systems_worker,
              switch_asked: false,
              switched: false,
@@ -2983,7 +2066,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              checker: None,
              downloader: None,
              skyward_checker: None,
-@@ -1467,6 +1590,7 @@
+@@ -1467,6 +1589,7 @@
                      match needs {
                          Needs::Data | Needs::User(_) => {
                              self.app.asked_opening();
@@ -2991,7 +2074,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
                              self.decryptor = Some(Decryptor::start(decrypt::Job::Open)?);
                              self.pending = Some(wanted);
                          }
-@@ -1522,7 +1646,14 @@
+@@ -1522,7 +1645,14 @@
              && !self.sideloading
              && let Err(e) = skyward_sys::usb::switch(skyward_sys::usb::resting(), USB_TIMEOUT)
          {
@@ -3007,7 +2090,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              self.app.report(&format!("{e:#}"), monotonic_ms());
          }
          if let Some(slot) = self.info.slot {
-@@ -1542,9 +1673,44 @@
+@@ -1542,9 +1672,44 @@
                  let _ = skyward_sys::kmsg(&format!("the vendor interface's libraries are not open: {e:#}"));
                  None
              });
@@ -3053,11 +2136,11 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          self.app.state.update_server = cfg.update.is_some();
          self.drive_at = Instant::now();
          Ok(())
-@@ -1562,12 +1728,25 @@
+@@ -1562,12 +1727,25 @@
          }
          if !self.touch_known && self.started.elapsed() >= TOUCH_WAIT {
              self.touch_known = true;
-+            // 没有标成 direct 的多点设备（17 Pro 的控制器就是这样）在等待用尽
++            // 没有标成 direct 的多点设备在等待用尽
 +            // 之后当作面板用，总比整块屏幕按不动强。
 +            if !self.inputs.has_panel() && self.inputs.take_spare_panel()? {
 +                self.app.set_touchscreen(true);
@@ -3079,7 +2162,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          self.take_readings(now)?;
          // In fastboot the page follows fastbootd and the cable each second.
          if self.fastboot && self.port_at.elapsed().as_secs() >= 1 {
-@@ -1611,6 +1790,20 @@
+@@ -1611,6 +1789,20 @@
          self.offer_storage(now)
      }
  
@@ -3100,7 +2183,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
      /// What time passing asks for: the motor's clicks and ticks, and the
      /// status bar's clock drawn again as its minute turns.
      fn tick(&mut self, now: u64) -> Result<()> {
-@@ -1620,7 +1813,15 @@
+@@ -1620,7 +1812,15 @@
                  // The power key held past its wait for volume down turns
                  // the screen off.
                  Effect::Ticks => self.ticks()?,
@@ -3117,7 +2200,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              }
          }
          let time = clock(self.app.state.time_zone)?;
-@@ -1628,21 +1829,35 @@
+@@ -1628,21 +1828,35 @@
              self.shown_clock = time;
              self.app.redraw();
          }
@@ -3157,7 +2240,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          }
          Ok(())
      }
-@@ -1723,6 +1938,11 @@
+@@ -1723,6 +1937,11 @@
              // refresh.
              self.surface.speed_up()?;
              self.rested_at = None;
@@ -3169,7 +2252,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          } else if self.surface.is_on() {
              // With the backlight off, the panel rests, and the touch
              // controller following it stops drawing power.
-@@ -2020,8 +2240,23 @@
+@@ -2020,8 +2239,23 @@
          }
          if worked {
              self.worker = None;
@@ -3195,7 +2278,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          }
          Ok(())
      }
-@@ -2196,11 +2431,229 @@
+@@ -2196,11 +2430,229 @@
                  self.app.set_traffic(t);
              }
          }
@@ -3425,7 +2508,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          Ok(())
      }
  
-@@ -2334,6 +2787,36 @@
+@@ -2334,6 +2786,36 @@
                  }
                  self.closed = opening.closed;
                  show_closed(&mut self.app, &self.closed)?;
@@ -3462,7 +2545,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              }
              decrypt::Ended::Opened(Err(why)) => {
                  skyward_sys::kmsg(&format!("the data partition stays closed: {why}"))?;
-@@ -2349,9 +2832,38 @@
+@@ -2349,9 +2831,38 @@
              decrypt::Ended::Unlocked(Ok(still)) => {
                  self.closed = still;
                  show_closed(&mut self.app, &self.closed)?;
@@ -3501,7 +2584,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
                  self.app.unlock_failed(why, now);
              }
          }
-@@ -2465,7 +2977,21 @@
+@@ -2465,7 +2976,21 @@
              let mut queue = VecDeque::from(effects);
              while let Some(fx) = queue.pop_front() {
                  eprintln!("effect {fx:?}");
@@ -3524,7 +2607,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              }
          }
          Ok(())
-@@ -2553,22 +3079,34 @@
+@@ -2553,22 +3078,34 @@
              // The decrypt page shows meanwhile that the work is
              // under way, and takes nothing more until it is done.
              Effect::OpenData => {
@@ -3563,7 +2646,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              Effect::StopJob => self.worker.as_ref().context("there is no work on files to stop")?.stop(),
              Effect::Relabel => self.relabel(now)?,
              Effect::StopRelabel => self.relabeler.as_ref().context("there is no relabeling to stop")?.stop(),
-@@ -2605,9 +3143,149 @@
+@@ -2605,9 +3142,149 @@
                  wlan_worker(&self.wlan)?.send(wlan::Command::Scan);
              }
              Effect::JoinWlan { ssid, name, security, password } => {
@@ -3713,7 +2796,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
              Effect::CheckUpdate => self.check_update()?,
              Effect::Download(release) => self.download(release, now)?,
              Effect::StopDownload => self.downloader.as_ref().context("there is no download to stop")?.stop(),
-@@ -2796,8 +3474,49 @@
+@@ -2796,8 +3473,49 @@
  
      /// Copy or move `path` into the folder `into`. A name taken where an
      /// entry goes is the user's to decide on before anything is written.
@@ -3763,7 +2846,7 @@ diff -ruN a/crates/skyward/src/ui.rs b/crates/skyward/src/ui.rs
          let clash = match clash {
              Some(choice) => clash_rule(choice),
              None => match skyward_files::clashes(&[PathBuf::from(&path)], Path::new(&into)) {
-@@ -2820,7 +3539,7 @@
+@@ -2820,7 +3538,7 @@
                  return Ok(());
              }
          };
@@ -4383,18 +3466,7 @@ diff -ruN a/crates/skyward-block/src/usb.rs b/crates/skyward-block/src/usb.rs
 diff -ruN a/crates/skyward-config/src/lib.rs b/crates/skyward-config/src/lib.rs
 --- a/crates/skyward-config/src/lib.rs	2026-11-17 00:00:00.000000000 +0000
 +++ b/crates/skyward-config/src/lib.rs	2026-11-17 00:00:00.000000000 +0000
-@@ -17,6 +17,10 @@
-     pub const MONO_LICENSE: &str = "skyward/KirkMono-OFL.txt";
-     /// The recovery service binary init starts.
-     pub const RECOVERY: &str = "system/bin/recovery";
-+    /// The same program under a name that runs the command it is given
-+    /// rather than the recovery service, for programs the recovery starts
-+    /// itself, such as the service a phone's weaver asks through.
-+    pub const CLI: &str = "system/bin/skyward";
-     /// The first program of a system installed beside the installed one,
-     /// which Skyward puts in that system's init_boot image: linked
-     /// statically, since it runs before any system's libraries are there.
-@@ -41,6 +45,32 @@
+@@ -41,6 +41,32 @@
      }
  }
  
@@ -4427,7 +3499,7 @@ diff -ruN a/crates/skyward-config/src/lib.rs b/crates/skyward-config/src/lib.rs
  #[derive(Debug, Clone, Deserialize)]
  pub struct DeviceConfig {
      pub device: Device,
-@@ -70,6 +100,12 @@
+@@ -70,6 +96,12 @@
      /// boot actions.
      #[serde(default)]
      pub owners: Vec<Owners>,
@@ -4440,48 +3512,15 @@ diff -ruN a/crates/skyward-config/src/lib.rs b/crates/skyward-config/src/lib.rs
      #[serde(default)]
      pub wipe: Wipe,
      #[serde(default)]
-@@ -271,6 +307,19 @@
-     /// System property that carries the vendor OS version.
-     #[serde(default = "default_os_version_prop")]
-     pub os_version_prop: String,
-+    /// Whether the recovery offers to update itself in place. A build made
-+    /// for one phone is not another's: a phone whose releases are not its own
-+    /// turns this off, so the page never pulls that phone's image here.
-+    #[serde(default = "default_true")]
-+    pub update: bool,
-+    /// Whether the phone's own parts — the slot's partitions, the drivers and
-+    /// the programs that use its keys — are brought up before the screen is
-+    /// drawn rather than beside it. The screen comes up first on phones where
-+    /// that takes seconds, so the phone does not look stuck; a phone whose
-+    /// touch panel and buttons only exist once the drivers are in wants them
-+    /// up before the recovery looks for them.
-+    #[serde(default)]
-+    pub parts_before_screen: bool,
- }
- 
- #[derive(Debug, Clone, Default, Deserialize)]
-@@ -773,6 +822,20 @@
+@@ -772,6 +804,7 @@
+         assert_eq!((touch.user.as_deref(), &touch.capabilities[..]), (Some("system"), &["SYS_NICE".to_string()][..]));
      }
  
-     #[test]
-+    fn a_phone_whose_releases_are_not_its_own_does_not_offer_to_update_itself() {
-+        // 17 Pro 的构建与 pudding 的发布仓库不是一回事：更新一次就把 17 的镜像
-+        // 装到 17 Pro 上。配置关掉它，其余机型默认开着。
-+        let pandora = DeviceConfig::parse(include_str!("../../../devices/pandora.toml")).unwrap();
-+        assert!(!pandora.device.update, "pandora names its own releases nowhere");
-+        for other in [
-+            include_str!("../../../devices/pudding.toml"),
-+            include_str!("../../../devices/byron.toml"),
-+        ] {
-+            assert!(DeviceConfig::parse(other).unwrap().device.update, "left on by default");
-+        }
-+    }
 +
-+    #[test]
+     #[test]
      fn each_phone_names_the_stock_build_its_recovery_is_made_on() {
          for (text, version) in [
-             (include_str!("../../../devices/nezha.toml"), "OS4.0.4.0.XPACNXM"),
-@@ -791,7 +854,7 @@
+@@ -791,7 +824,7 @@
              (include_str!("../../../devices/dada.toml"), "OS3.0.307.0.WOCCNXM"),
              (include_str!("../../../devices/haotian.toml"), "OS3.0.309.0.WOBCNXM"),
              (include_str!("../../../devices/xuanyuan.toml"), "OS3.0.314.0.WOACNXM"),
@@ -8209,27 +7248,15 @@ diff -ruN a/crates/skyward-ui/src/app/skyward.rs b/crates/skyward-ui/src/app/sky
          app.refresh();
          let offered = |app: &mut App| app.frame(&f, &i).hits.iter().any(|h| h.action == Action::Open(Screen::SkywardUpdate));
          assert!(!offered(&mut app), "a phone whose WLAN the recovery does not bring up");
-@@ -144,13 +145,26 @@
+@@ -144,13 +145,14 @@
          app.skyward_ended(SkywardEnd::Updated(vec![Slot::A, Slot::B]), 3000);
          assert_eq!(tap_at(&mut app, &f, &i, Action::RebootTo(Target::Recovery), 5000), vec![Effect::Reboot(Target::Recovery)]);
          app.key(Key::Back, 5100);
 -        assert_eq!(app.screen(), Screen::Settings);
 +        assert_eq!(app.screen(), Screen::Home, "back to where the update was asked for");
-+    }
-+
-+    #[test]
-+    fn a_phone_that_does_not_update_itself_is_not_offered_the_page() {
-+        let (f, i) = (fonts(), info());
-+        let mut app = App::new(Screen::Home, W, H, PPD);
-+        app.state.wlan = Some(connected("Skyward"));
-+        app.state.recovery_partitions = true;
-+        app.refresh();
-+        assert!(app.frame(&f, &i).hits.iter().any(|h| h.action == Action::Open(Screen::SkywardUpdate)), "offered where the build updates itself");
-+        app.state.updates = false;
-+        app.refresh();
-+        assert!(!app.frame(&f, &i).hits.iter().any(|h| h.action == Action::Open(Screen::SkywardUpdate)), "no entry where the build is not this phone's to update");
      }
  
++
      #[test]
      fn the_skyward_page_asks_github_as_it_opens_once_a_network_is_joined() {
          let (f, i) = (fonts(), info());
@@ -8276,19 +7303,17 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
  /// Choices the pages show and the user changes, and where installing
  /// stands.
  #[derive(Clone, Debug, PartialEq)]
-@@ -87,6 +115,11 @@
+@@ -87,6 +115,9 @@
      /// partitions in both slots, which a switch writes, and recovery
      /// partitions apart from them, which keep Skyward through it.
      pub dual_boot: bool,
-+    /// Whether this build offers to update itself, as its device says.
-+    pub updates: bool,
 +    /// A copy or a move waiting to be told where it goes: the phone or the
 +    /// drive, asked before the folder it lands in is walked to.
 +    pub place_ask: Option<crate::app::FileOp>,
      /// The systems, as the runtime last read them, or why it could not;
      /// none until it has.
      pub systems: Option<Result<Overview, String>>,
-@@ -101,6 +134,14 @@
+@@ -101,6 +132,14 @@
      /// Where the data partition stands, and what is typed at the screen
      /// lock its users' own files wait on.
      pub data: Data,
@@ -8303,7 +7328,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      pub code: String,
      /// What is typed in the search field.
      pub search: String,
-@@ -111,6 +152,21 @@
+@@ -111,6 +150,21 @@
      pub held: Option<Action>,
      /// The folder the file manager shows.
      pub files: Folder,
@@ -8325,7 +7350,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      /// The folder of internal storage a file to install is chosen in, its
      /// path from the top of the storage.
      pub storage: Folder,
-@@ -134,6 +190,18 @@
+@@ -134,6 +188,18 @@
      /// Deleting the entry the file page shows, or the backup the restore
      /// page shows, was asked for; a swipe confirms it.
      pub asking_delete: bool,
@@ -8344,7 +7369,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      /// A copy or move waiting on what to do with the names taken where it
      /// goes, and those names.
      pub clash: Option<(Clip, String, Vec<String>)>,
-@@ -158,6 +226,29 @@
+@@ -158,6 +224,29 @@
      /// The WLAN, as the runtime last told it; none on a phone whose WLAN the
      /// recovery does not bring up.
      pub wlan: Option<Wlan>,
@@ -8374,11 +7399,10 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      /// The network the password page is for, and what is typed there.
      pub joining: Option<Network>,
      /// The network the details page is of, as it was found.
-@@ -224,16 +315,27 @@
+@@ -224,16 +313,26 @@
              boot_slots: None,
              next_slot: None,
              dual_boot: false,
-+            updates: true,
 +            place_ask: None,
              systems: None,
              system_pick: None,
@@ -8402,7 +7426,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              storage: Folder::new(""),
              usb_drive: None,
              drive: Folder::new(""),
-@@ -245,6 +347,11 @@
+@@ -245,6 +344,11 @@
              new_name: String::new(),
              editor: None,
              asking_delete: false,
@@ -8414,7 +7438,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              clash: None,
              job: None,
              relabel: None,
-@@ -254,6 +361,17 @@
+@@ -254,6 +358,17 @@
              part_work: None,
              update: Standing::None,
              wlan: None,
@@ -8432,7 +7456,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              joining: None,
              details: None,
              adding: None,
-@@ -284,6 +402,7 @@
+@@ -284,6 +399,7 @@
      pub fn folder(&self, screen: Screen) -> &Folder {
          match screen {
              Screen::Files => &self.files,
@@ -8440,7 +7464,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              Screen::Choose(Place::Storage) => &self.storage,
              Screen::Choose(Place::UsbDrive) => &self.drive,
              other => unreachable!("{other:?} lists no folder"),
-@@ -293,6 +412,7 @@
+@@ -293,6 +409,7 @@
      pub(super) fn folder_mut(&mut self, screen: Screen) -> &mut Folder {
          match screen {
              Screen::Files => &mut self.files,
@@ -8448,7 +7472,7 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
              Screen::Choose(Place::Storage) => &mut self.storage,
              Screen::Choose(Place::UsbDrive) => &mut self.drive,
              other => unreachable!("{other:?} lists no folder"),
-@@ -301,6 +421,28 @@
+@@ -301,6 +418,28 @@
  
      /// Whether the files of `place` can be read: internal storage once it
      /// is open, a USB drive once the runtime shows it.
@@ -8477,15 +7501,6 @@ diff -ruN a/crates/skyward-ui/src/app/state.rs b/crates/skyward-ui/src/app/state
      pub fn place_open(&self, place: Place) -> bool {
          match place {
              Place::Storage => self.data.storage_open(),
-@@ -345,7 +487,7 @@
-     pub fn offers(&self, screen: Screen) -> bool {
-         match screen {
-             Screen::Wlan => self.wlan.is_some(),
--            Screen::SkywardUpdate => self.wlan.is_some() && self.recovery_partitions,
-+            Screen::SkywardUpdate => self.updates && self.wlan.is_some() && self.recovery_partitions,
-             Screen::Systems => self.dual_boot,
-             _ => true,
-         }
 diff -ruN a/crates/skyward-ui/src/app/systems.rs b/crates/skyward-ui/src/app/systems.rs
 --- a/crates/skyward-ui/src/app/systems.rs	2026-11-17 00:00:00.000000000 +0000
 +++ b/crates/skyward-ui/src/app/systems.rs	2026-11-17 00:00:00.000000000 +0000
@@ -11123,133 +10138,6 @@ diff -ruN a/devices/byron.toml.upstream b/devices/byron.toml.upstream
 +[haptics]
 +resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
 +strength = { lightest = 0.25, strongest = 0.75 }
-diff -ruN a/devices/pandora.toml b/devices/pandora.toml
---- a/devices/pandora.toml	2026-11-17 00:00:00.000000000 +0000
-+++ b/devices/pandora.toml	2026-11-17 00:00:00.000000000 +0000
-@@ -5,6 +5,12 @@
- ab = true
- soc = { hans = "第五代骁龙®8至尊版移动平台", hant = "Snapdragon® 8 Elite Gen 5 行動平台", en = "Snapdragon® 8 Elite Gen 5 Mobile Platform" }
- os_version_prop = "ro.mi.os.version.incremental"
-+# 这份 recovery 是这个机型自己的，而在线更新指向的是 pudding 的发布仓库：
-+# 一更新就把 17 的镜像装到 17 Pro 上。关上，等有自己的发布线再开。
-+update = false
-+# 触摸与按键由驱动装载后才出现；先带起手机自己的部件再画第一帧，
-+# 否则第一轮扫描只看得到空目录（参考包也是这个顺序）。
-+parts_before_screen = true
- 
- [display]
- # persist.sys.miui_resolution in the odm partition's build.prop.
-@@ -16,8 +22,10 @@
- sources = ["vendor_boot", "vendor_dlkm", "vendor", "system_dlkm"]
- # The touchscreen comes from two makers: Synaptics TouchComm and FocalTech,
- # both behind Xiaomi's touch layer. The phone's own modules.load lists both
--# drivers, and only the one whose controller is fitted finds it.
--load = ["synaptics_tcm2", "focaltech_touch"]
-+# drivers, and only the one whose controller is fitted finds it. The NFC
-+# controller's driver makes the node the phone's NFC HAL talks to the
-+# secure element through, which the phone's own init loads before it.
-+load = ["synaptics_tcm2", "focaltech_touch", "nxp-nci"]
- 
- # As on the 17 Ultra, the controller comes back from its reset sending raw
- # frames for /odm/lib64/libtouchreport.so, which a recovery runs none of;
-@@ -58,6 +66,97 @@
- user = "root"
- groups = ["root", "system", "wakelock", "graphics"]
- 
-+# The secure world's programs, in the order the installed system's init
-+# starts them; without them nothing can use a key the phone wrapped in
-+# hardware, and the data partition cannot be opened. The 17 Ultra's vendor
-+# partition is this phone's file for file, so it names the same programs.
-+
-+# The secure world reaches back into Android through the listeners this
-+# daemon registers; without them the key service cannot use any key.
-+[[service]]
-+path = "/vendor/bin/qseecomd"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+ready_property = "vendor.sys.listeners.registered"
-+user = "root"
-+groups = ["root", "drmrpc"]
-+
-+# The opener the secure world's apps are reached through by programs that
-+# speak to them as GlobalPlatform's TEE client does, which loads those apps
-+# from /vendor/firmware_mnt/image as they are first asked for.
-+[[service]]
-+path = "/vendor/bin/hlosminkdaemon"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+user = "system"
-+groups = ["system", "oem_2912", "wakelock"]
-+capabilities = ["WAKE_ALARM", "BLOCK_SUSPEND"]
-+
-+# The key service, which is the only thing that can use the keys the phone
-+# wrapped in hardware. The same program serves the secure clock and the
-+# shared secret, which the phone describes apart from it.
-+[[service]]
-+path = "/vendor/bin/hw/android.hardware.security.onekeymint-service-qti"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+ready_service = "android.hardware.security.keymint.IKeyMintDevice/default"
-+registers = [
-+    "android.hardware.security.keymint.IRemotelyProvisionedComponent/default",
-+    "android.hardware.security.secureclock.ISecureClock/default",
-+    "android.hardware.security.sharedsecret.ISharedSecret/default",
-+]
-+user = "system"
-+groups = ["system", "drmrpc"]
-+
-+# The credential service: it is what the secure world has check the secret
-+# behind a screen lock, and the only thing that can hand out the note the
-+# key service wants before it will use a key that secret guards.
-+[[service]]
-+path = "/vendor/bin/hw/android.hardware.gatekeeper-rust-service-qti"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+ready_service = "android.hardware.gatekeeper.IGatekeeper/default"
-+user = "system"
-+groups = ["system"]
-+
-+# The secure element: the phone's embedded one, which its own programs
-+# reach through the HAL its vendor partition carries. The weaver's slots are
-+# in it, so it runs before the weaver. It reaches the chip through the node
-+# the NFC controller's driver makes, so that module is loaded first.
-+[[service]]
-+path = "/vendor/bin/hw/android.hardware.secure_element-service.qti"
-+libraries = ["/system/lib64", "/vendor/lib64", "/vendor/lib64/hw", "/odm/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"]
-+ready_service = "android.hardware.secure_element.ISecureElement/eSE1"
-+user = "system"
-+groups = ["nfc", "system"]
-+
-+# The service the weaver asks the secure element's applets through. Android
-+# keeps it in its framework, which a recovery runs none of, so Skyward
-+# serves it: the same program, under the name that runs a command instead
-+# of the recovery, over that secure element HAL.
-+[[service]]
-+path = "/system/bin/skyward"
-+args = ["omapi"]
-+libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"]
-+ready_service = "android.se.omapi.ISecureElementService/default"
-+
-+# The weaver, in the phone's NXP secure element, behind the program the
-+# installed system's init enables as vendor.weaver_nxp. Every user's secret
-+# is bound to a slot of it, with a screen lock or without, so without it
-+# none of the users' own files open. It runs as root: its own libraries ask
-+# for the installed system's libvndksupport, which the linker only searches
-+# for a program that does not change its user.
-+[[service]]
-+path = "/odm/bin/hw/android.hardware.weaver-service.nxp-qti"
-+libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64", "/mnt/system/system/lib64", "/mnt/system/system/lib64/bootstrap"]
-+ready_service = "android.hardware.weaver.IWeaver/default"
-+
-+# The boot control, which says which slot the bootloader starts next and
-+# switches it, writing where the bootloader reads it. It comes last: the
-+# phone is usable without it.
-+[[service]]
-+path = "/vendor/bin/hw/android.hardware.boot-service.qti"
-+libraries = ["/system/lib64", "/vendor/lib64"]
-+ready_service = "android.hardware.boot.IBootControl/default"
-+user = "root"
-+groups = ["root"]
-+
- # WLAN: Qualcomm's Peach on PCIe (qcom,cnss-peach in its dtbo), as on the
- # 17 Ultra, whose vendor partition this phone shares file for file but for
- # its build properties, a power hint and two radio libraries.
 diff -ruN a/vendor/qrcodegen/Cargo.lock b/vendor/qrcodegen/Cargo.lock
 --- a/vendor/qrcodegen/Cargo.lock	1970-01-01 00:00:00.000000000 +0000
 +++ b/vendor/qrcodegen/Cargo.lock	2026-11-17 00:00:00.000000000 +0000

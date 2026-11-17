@@ -67,10 +67,10 @@ adb reboot recovery                          # 从系统进，别用 fastboot re
 
 ```
 镜像    skyward-pudding-20261117-0.3.11-OS4.0.6.0.XPCCNXM.img  104857600 字节
-sha256  3d21be934aa5835c7ef001f534dc210443aa29dbc5ee3a9e559881b161553a07
-md5     80d07d73b0ec7feb3ff69768fa9ad4af
-zip     skyward-v0.3.11-pudding-OS4.0.6.0.XPCCNXM.zip  46380632 字节（更新器用）
-sha256  1a6a92b959d207292c3b13dad99c69ca80255de971f61acf9d803bafeae52440
+sha256  bff267b1f180952250d3a632c3f80956d1897df5c9a2ae837570c8756c266f0c
+md5     3842e2bae5803b953ac10bad3a2d5aa4
+zip     skyward-v0.3.11-pudding-OS4.0.6.0.XPCCNXM.zip  46371378 字节（更新器用）
+sha256  378efe93bad5b392f634c5d258634c7fe22312967e23373bd20a7aa68fa11f30
 ```
 
 ## 从源码重建
