@@ -1,12 +1,36 @@
 {
   "modules": [
     {
-      "id": "lsposed",
+      "id": "zygisk_lsposed",
       "name": "LSPosed (Zygisk)",
-      "version": "1.9.3",
+      "version": "1.9.2",
       "author": "LSPosed Developers",
-      "description": "在 Zygisk 上运行的 ART 钩子框架，配合 KSU / Magisk 使用。",
-      "url": "https://github.com/LSPosed/LSPosed/releases/latest/download/LSPosed-v1.9.3-7026-zygisk-release.zip"
+      "description": "在 Zygisk 上运行的 ART 钩子框架，模块生态最全。",
+      "repo": "LSPosed/LSPosed"
+    },
+    {
+      "id": "zygisknext",
+      "name": "Zygisk Next",
+      "version": "1.5.3",
+      "author": "Dr-TSNG",
+      "description": "给没有内置 Zygisk 的内核补一套 Zygisk 实现，LSPosed 之类靠它。",
+      "repo": "Dr-TSNG/ZygiskNext"
+    },
+    {
+      "id": "shamiko",
+      "name": "Shamiko",
+      "version": "1.2.5",
+      "author": "LSPosed Developers",
+      "description": "对指定应用隐藏 root，配合 Zygisk 使用。",
+      "repo": "LSPosed/LSPosed.github.io"
+    },
+    {
+      "id": "trickystore",
+      "name": "Tricky Store",
+      "version": "1.4.1",
+      "author": "5ec1cff",
+      "description": "给指定应用提供一份可用的密钥库，常用于过完整性检查。",
+      "repo": "5ec1cff/TrickyStore"
     },
     {
       "id": "busybox-ndk",
@@ -14,7 +38,7 @@
       "version": "1.36.1",
       "author": "osm0sis",
       "description": "给系统加一套 BusyBox 工具。",
-      "url": "https://github.com/Magisk-Modules-Repo/busybox-ndk/releases/latest/download/busybox-ndk.zip"
+      "repo": "Magisk-Modules-Repo/busybox-ndk"
     }
   ]
 }
