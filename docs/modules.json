@@ -1,0 +1,20 @@
+{
+  "modules": [
+    {
+      "id": "lsposed",
+      "name": "LSPosed (Zygisk)",
+      "version": "1.9.3",
+      "author": "LSPosed Developers",
+      "description": "在 Zygisk 上运行的 ART 钩子框架，配合 KSU / Magisk 使用。",
+      "url": "https://github.com/LSPosed/LSPosed/releases/latest/download/LSPosed-v1.9.3-7026-zygisk-release.zip"
+    },
+    {
+      "id": "busybox-ndk",
+      "name": "BusyBox for Android",
+      "version": "1.36.1",
+      "author": "osm0sis",
+      "description": "给系统加一套 BusyBox 工具。",
+      "url": "https://github.com/Magisk-Modules-Repo/busybox-ndk/releases/latest/download/busybox-ndk.zip"
+    }
+  ]
+}
