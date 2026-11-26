@@ -93,6 +93,10 @@ jobs:
           RELEASE="${RELEASE#v}"
           echo "发布号：$RELEASE"
           export CC_aarch64_linux_android=/tmp/cc-aarch64.sh
+          # skyward-ui/build.rs 编拼音词典的 C++（.cpp）用 cc 的 cpp(true)，走 CXX；
+          # 只设 CC 不够，cc 会去找 aarch64-linux-android-clang++ 报 ToolNotFound。
+          # clang 按扩展名 .cpp 自动当 C++ 编，同一个包装脚本即可（2026-11-26）。
+          export CXX_aarch64_linux_android=/tmp/cc-aarch64.sh
           export AR_aarch64_linux_android=ar
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=/tmp/cc-aarch64.sh
           export SKYWARD_RELEASE="$RELEASE"
