@@ -39158,10 +39158,34 @@ index 43e241f..6b2c1ea 100644
  
      /// The ticks of the screen going off, as strong as the phone's own
 diff --git a/crates/skyward/src/input.rs b/crates/skyward/src/input.rs
-index 4a9d65c..9837343 100644
+index 4a9d65c..8e5ae10 100644
 --- a/crates/skyward/src/input.rs
 +++ b/crates/skyward/src/input.rs
-@@ -114,7 +114,7 @@ impl Panel {
+@@ -10,6 +10,23 @@ use std::fs;
+ use std::io::{self, ErrorKind};
+ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+ use std::path::PathBuf;
++use std::thread;
++use std::time::Duration;
++
++/// How often what the touchscreen was told is told to it again. A panel's
++/// driver may put the touch controller back into the state it powers up in
++/// when the panel comes back from sleep — Xiaomi's does, in
++/// `xiaomi_touch_resume_work` — and nothing in /dev/input changes when it
++/// does, so the scan that runs on a device appearing never sees it. Written
++/// once for the life of the recovery, the setting would be gone after the
++/// first sleep and every touch after it would land nowhere. Writing it again
++/// on a timer costs a small write to sysfs and covers every such reset.
++///
++/// Once a second, as the phone's own recovery does: a panel that comes back
++/// is usable at once rather than after a wait, and the write is a few bytes
++/// to a node the driver already holds in memory (2026-11-26, from
++/// 08Tang/skyward_annibale 8e01423e).
++const TOUCH_REFRESH: Duration = Duration::from_secs(1);
+ 
+ pub enum Event {
+     /// A touch and when the panel reported it, on [`monotonic_ms`]'s clock.
+@@ -114,7 +131,7 @@ impl Panel {
          // so a touch landing where the last one lifted carries no position;
          // start from what the panel holds now.
          panel.resync().context("read the touch state")?;
@@ -39170,7 +39194,7 @@ index 4a9d65c..9837343 100644
          Ok(panel)
      }
  
-@@ -185,6 +185,8 @@ pub struct Inputs {
+@@ -185,6 +202,8 @@ pub struct Inputs {
      /// the phone awake until it is read.
      wakeful: Wakeful,
      panel: Option<Panel>,
@@ -39179,7 +39203,7 @@ index 4a9d65c..9837343 100644
      buttons: Vec<(PathBuf, RawDevice)>,
      seen: HashSet<PathBuf>,
      /// What the touchscreen is told each time its panel is taken in.
-@@ -212,6 +214,7 @@ impl Inputs {
+@@ -212,6 +231,7 @@ impl Inputs {
              watch,
              wakeful,
              panel: None,
@@ -39187,16 +39211,51 @@ index 4a9d65c..9837343 100644
              buttons: Vec::new(),
              seen: HashSet::new(),
              touch_writes,
-@@ -220,7 +223,7 @@ impl Inputs {
+@@ -220,11 +240,42 @@ impl Inputs {
          };
          inputs.scan()?;
          if inputs.panel.is_none() {
 -            eprintln!("no touch panel yet; waiting for one to appear under /dev/input");
 +            let _ = skyward_sys::kmsg("no touch panel yet; waiting for one to appear under /dev/input");
          }
++        inputs.keep_touch_told();
          Ok(inputs)
      }
-@@ -239,13 +242,19 @@ impl Inputs {
+ 
++    /// Tell the touchscreen again, every `TOUCH_REFRESH`, what it was told
++    /// when its panel was taken in. A panel's driver may undo that when it
++    /// comes back from sleep, and it does so without /dev/input changing, so
++    /// nothing here would otherwise notice.
++    ///
++    /// A write that fails is not fatal: the node may be gone if the module
++    /// was unloaded, or not be there yet. The next round tries again.
++    fn keep_touch_told(&self) {
++        let writes = self.touch_writes.clone();
++        if writes.is_empty() {
++            return;
++        }
++        let started = thread::Builder::new().name("touch".into()).spawn(move || {
++            loop {
++                thread::sleep(TOUCH_REFRESH);
++                for w in &writes {
++                    if fs::write(&w.path, &w.value).is_err() {
++                        continue;
++                    }
++                    let _ = skyward_sys::kmsg(&format!("wrote {} to {} for the touchscreen again", w.value, w.path));
++                }
++            }
++        });
++        if let Err(e) = started {
++            // The setting written when the panel was taken in still stands;
++            // only a later reset by the driver would be left uncovered.
++            eprintln!("touch: no thread to keep the touchscreen told: {e}");
++        }
++    }
++
+     /// Take in the devices under /dev/input not seen before: the first
+     /// direct multitouch device as the panel, and every device with a
+     /// power, volume or back key as buttons. A panel taken in is told what
+@@ -239,13 +290,19 @@ impl Inputs {
                  .supported_absolute_axes()
                  .is_some_and(|a| a.contains(AbsoluteAxisCode::ABS_MT_POSITION_X) && a.contains(AbsoluteAxisCode::ABS_MT_POSITION_Y));
              let keys = dev.supported_keys().is_some_and(|k| KEYS.iter().any(|c| k.contains(*c)));
@@ -39223,7 +39282,7 @@ index 4a9d65c..9837343 100644
                  }
              } else if keys {
                  set_nonblocking(dev.as_raw_fd()).context("make buttons non-blocking")?;
-@@ -253,9 +262,45 @@ impl Inputs {
+@@ -253,9 +310,45 @@ impl Inputs {
                  self.buttons.push((path, dev));
              }
          }
@@ -39269,7 +39328,7 @@ index 4a9d65c..9837343 100644
      /// Empty the watch's queue; true when /dev/input changed.
      fn changed(&self) -> Result<bool> {
          let mut buf = [0u8; 4096];
-@@ -295,7 +340,7 @@ impl Inputs {
+@@ -295,7 +388,7 @@ impl Inputs {
              match panel.read(self.w, self.h, &mut out) {
                  Ok(()) => {}
                  Err(e) if gone(&e) => {
@@ -39278,7 +39337,7 @@ index 4a9d65c..9837343 100644
                      self.seen.remove(&panel.path);
                      self.panel = None;
                  }
-@@ -318,7 +363,7 @@ impl Inputs {
+@@ -318,7 +411,7 @@ impl Inputs {
                  }
                  Err(e) if e.kind() == ErrorKind::WouldBlock => {}
                  Err(e) if gone(&e) => {
@@ -45789,6 +45848,32 @@ index 0000000..1018a19
 +        assert_eq!(unhex("536172766135").as_deref(), Some(b"Sarva5".as_slice()));
 +    }
 +}
+diff --git a/devices/annibale.toml b/devices/annibale.toml
+index 1eab42e..d1479b6 100644
+--- a/devices/annibale.toml
++++ b/devices/annibale.toml
+@@ -57,7 +57,7 @@ modules = ["rfkill", "qca_cld3_kiwi_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
+diff --git a/devices/aurora.toml b/devices/aurora.toml
+index c9f70a5..db18f2e 100644
+--- a/devices/aurora.toml
++++ b/devices/aurora.toml
+@@ -60,7 +60,7 @@ modules = ["rfkill", "qca_cld3_kiwi_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
 diff --git a/devices/bixi.toml b/devices/bixi.toml
 new file mode 100644
 index 0000000..b1733c5
@@ -46071,6 +46156,45 @@ index 0000000..b1733c5
 +    "/data/vendor/tombstones",
 +    "/data/vendor/wlan_logs",
 +]
+diff --git a/devices/byron.toml b/devices/byron.toml
+index 0b33428..1e9588a 100644
+--- a/devices/byron.toml
++++ b/devices/byron.toml
+@@ -94,3 +94,21 @@ recovery = "da70265665598f9d66e18bfe49d681b33da63d7ddb1a73375e8f1c7433710e25"
+ [haptics]
+ resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
+ strength = { lightest = 0.25, strongest = 0.75 }
++
++# The baseband's settings with the phone's own identity, and the sensors'
++# calibration, which the phone's own recovery backs up too: modemst1 and
++# modemst2 hold the modem's own storage, fsg the factory settings it falls
++# back on, fsc the counters beside them, and persist the MAC addresses, the
++# sensors' calibration and the WLAN's own files. Losing them means a trip to
++# the maker's service centre.
++[backup]
++efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
++data_skipped = [
++    "vendor/tzstorage",
++    "vendor/qtee",
++    "vendor/mitee",
++    "vendor/goodix",
++    "vendor/fingerprint",
++    "vendor/fpdata",
++    "vendor/misc/mi_fp",
++]
+diff --git a/devices/dada.toml b/devices/dada.toml
+index 8ddfc28..8cb8b0e 100644
+--- a/devices/dada.toml
++++ b/devices/dada.toml
+@@ -71,7 +71,7 @@ modules = ["rfkill", "qca_cld3_peach_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/peach_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/peach_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/peach_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/peach_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
 diff --git a/devices/diting.toml b/devices/diting.toml
 new file mode 100644
 index 0000000..d282290
@@ -46270,6 +46394,48 @@ index 0000000..d282290
 +    "/data/vendor/tombstones",
 +    "/data/vendor/wlan_logs",
 +]
+diff --git a/devices/fuxi.toml b/devices/fuxi.toml
+index 9f29ee2..fa5a7b9 100644
+--- a/devices/fuxi.toml
++++ b/devices/fuxi.toml
+@@ -113,7 +113,7 @@ modules = ["qca_cld3_kiwi_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "kiwi_v2/wlan_mac.bin" },
++    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "kiwi_v2/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
+diff --git a/devices/haotian.toml b/devices/haotian.toml
+index 0f77da8..a35596a 100644
+--- a/devices/haotian.toml
++++ b/devices/haotian.toml
+@@ -62,9 +62,9 @@ modules = ["rfkill", "qca_cld3_peach", "qca_cld3_peach_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/peach/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/peach/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/peach/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/peach/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+     { name = "wlan/qca_cld/peach_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/peach_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/peach_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/peach_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
+diff --git a/devices/houji.toml b/devices/houji.toml
+index e63da5e..e3d50f6 100644
+--- a/devices/houji.toml
++++ b/devices/houji.toml
+@@ -57,7 +57,7 @@ modules = ["rfkill", "qca_cld3_kiwi_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
 diff --git a/devices/manet.toml b/devices/manet.toml
 new file mode 100644
 index 0000000..b65ad05
@@ -46417,6 +46583,22 @@ index 0000000..b65ad05
 +    "/data/vendor/tombstones",
 +    "/data/vendor/wlan_logs",
 +]
+diff --git a/devices/miro.toml b/devices/miro.toml
+index c862d97..896fd6a 100644
+--- a/devices/miro.toml
++++ b/devices/miro.toml
+@@ -62,9 +62,9 @@ modules = ["rfkill", "qca_cld3_peach", "qca_cld3_peach_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/peach/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/peach/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/peach/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/peach/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+     { name = "wlan/qca_cld/peach_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/peach_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/peach_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/peach_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
 diff --git a/devices/mondrian.toml b/devices/mondrian.toml
 new file mode 100644
 index 0000000..1fdd5c5
@@ -46718,6 +46900,19 @@ index 0000000..5cb738a
 +    "/data/vendor/wlan_logs",
 +]
 \ No newline at end of file
+diff --git a/devices/nuwa.toml b/devices/nuwa.toml
+index 54af094..9e3b466 100644
+--- a/devices/nuwa.toml
++++ b/devices/nuwa.toml
+@@ -123,7 +123,7 @@ modules = ["qca_cld3_kiwi_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "kiwi_v2/wlan_mac.bin" },
++    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "kiwi_v2/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
 diff --git a/devices/onyx.toml b/devices/onyx.toml
 new file mode 100644
 index 0000000..8c232d5
@@ -47150,6 +47345,32 @@ index fef21df..bf519bf 100644
 +# WLAN: Qualcomm's Peach on PCIe (qcom,cnss-peach in its dtbo), as on the
 +# 17 Ultra, whose vendor partition this phone shares file for file but for
 +# its build properties, a power hint and two radio libraries.
+diff --git a/devices/pudding.toml b/devices/pudding.toml
+index 9047d5f..db44f3c 100644
+--- a/devices/pudding.toml
++++ b/devices/pudding.toml
+@@ -88,3 +88,21 @@ recovery = "c9e8158ed7367fcded4f8175e3c8cd017688e4c40c11a2b620082008d27ae151"
+ [haptics]
+ resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
+ strength = { lightest = 0.25, strongest = 0.75 }
++
++# The baseband's settings with the phone's own identity, and the sensors'
++# calibration, which the phone's own recovery backs up too: modemst1 and
++# modemst2 hold the modem's own storage, fsg the factory settings it falls
++# back on, fsc the counters beside them, and persist the MAC addresses, the
++# sensors' calibration and the WLAN's own files. Losing them means a trip to
++# the maker's service centre.
++[backup]
++efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
++data_skipped = [
++    "vendor/tzstorage",
++    "vendor/qtee",
++    "vendor/mitee",
++    "vendor/goodix",
++    "vendor/fingerprint",
++    "vendor/fpdata",
++    "vendor/misc/mi_fp",
++]
 diff --git a/devices/ruyi.toml b/devices/ruyi.toml
 new file mode 100644
 index 0000000..9474d96
@@ -47408,6 +47629,19 @@ index 0000000..f38136c
 +
 +[wipe]
 +logs = ["/data/miuilog", "/data/vendor/diag", "/data/vendor/log", "/data/vendor/ramdump", "/data/vendor/tombstones", "/data/vendor/wlan_logs"]
+diff --git a/devices/shennong.toml b/devices/shennong.toml
+index 1b8c3bb..3941b5c 100644
+--- a/devices/shennong.toml
++++ b/devices/shennong.toml
+@@ -60,7 +60,7 @@ modules = ["rfkill", "qca_cld3_kiwi_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
 diff --git a/devices/unicorn.toml b/devices/unicorn.toml
 new file mode 100644
 index 0000000..9d17275
@@ -47693,6 +47927,48 @@ index 0000000..7822ce1
 +# storage and the fingerprint daemon's templates, which an older copy
 +# written back would not open.
 +data_skipped = ["vendor/tzstorage", "vendor/qtee", "vendor/misc/mi_fp", "vendor/fpc", "vendor/fpdump", "vendor/goodix", "vendor/fingerprint"]
+diff --git a/devices/warsaw.toml b/devices/warsaw.toml
+index eaf9afc..8d7a58a 100644
+--- a/devices/warsaw.toml
++++ b/devices/warsaw.toml
+@@ -59,7 +59,7 @@ modules = ["rfkill", "qca_cld3_kiwi_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
+diff --git a/devices/xuanyuan.toml b/devices/xuanyuan.toml
+index bb912da..700ea7d 100644
+--- a/devices/xuanyuan.toml
++++ b/devices/xuanyuan.toml
+@@ -62,9 +62,9 @@ modules = ["rfkill", "qca_cld3_peach", "qca_cld3_peach_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/peach/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/peach/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/peach/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/peach/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+     { name = "wlan/qca_cld/peach_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/peach_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/peach_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/peach_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
+diff --git a/devices/zorn.toml b/devices/zorn.toml
+index eb792cf..17c0a3c 100644
+--- a/devices/zorn.toml
++++ b/devices/zorn.toml
+@@ -60,7 +60,7 @@ modules = ["rfkill", "qca_cld3_kiwi_v2"]
+ writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+ firmware = [
+     { name = "wlan/qca_cld/kiwi_v2/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/kiwi_v2/WCNSS_qcom_cfg.ini" },
+-    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin" },
++    { name = "wlan/qca_cld/kiwi_v2/wlan_mac.bin", partition = "persist", path = "wlan/wlan_mac.bin", optional = true },
+ ]
+ interface = "wlan0"
+ supplicant = "/vendor/bin/hw/wpa_supplicant"
 diff --git a/resources/fonts/NotoColorEmoji-OFL.txt b/resources/fonts/NotoColorEmoji-OFL.txt
 new file mode 100644
 index 0000000..c82d72e
