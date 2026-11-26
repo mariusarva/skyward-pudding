@@ -1,12 +1,12 @@
 {
-  "tag_name": "v0.5.8",
+  "tag_name": "v0.5.9",
   "assets": [
     {
-      "name": "skyward-v0.5.8-pudding-OS4.0.6.0.XPCCNXM.zip",
-      "size": 50334788,
-      "digest": "sha256:d067c76f241bed4a4cdbcc151d3e8289775bda8dcb0048fd0fb7a03aecfcd888",
-      "url": "https://ghfast.top/https://github.com/mariusarva/skyward-pudding/releases/download/v0.5.8/skyward-v0.5.8-pudding-OS4.0.6.0.XPCCNXM.zip",
-      "browser_download_url": "https://github.com/mariusarva/skyward-pudding/releases/download/v0.5.8/skyward-v0.5.8-pudding-OS4.0.6.0.XPCCNXM.zip"
+      "name": "skyward-v0.5.9-pudding-OS4.0.6.0.XPCCNXM.zip",
+      "size": 50423600,
+      "digest": "sha256:e33ce9083a07b77df63123d3bcc91a6de46f741b86bd6b8ebd81d30b41215766",
+      "url": "https://ghfast.top/https://github.com/mariusarva/skyward-pudding/releases/download/v0.5.9/skyward-v0.5.9-pudding-OS4.0.6.0.XPCCNXM.zip",
+      "browser_download_url": "https://github.com/mariusarva/skyward-pudding/releases/download/v0.5.9/skyward-v0.5.9-pudding-OS4.0.6.0.XPCCNXM.zip"
     }
   ]
 }
