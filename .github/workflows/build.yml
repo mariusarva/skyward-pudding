@@ -64,8 +64,11 @@ jobs:
           [ -f "$PATCH" ] || PATCH=$(ls -1 patches/skyward-pudding-*.patch | sort -V | tail -1)
           echo "补丁：$PATCH"
           cd src
-          patch --version | head -1
-          patch -p1 --batch --no-backup-if-mismatch < "../$PATCH" || true
+          # 补丁里有二进制（拼音词典数据、字体、测试用 so），GNU patch 不支持
+          # "GIT binary patch" 段，会报 "git binary diffs are not supported" 并跳过，
+          # 编到 skyward-ui/build.rs 生成词典时才炸。用 git apply 落二进制（2026-11-26）。
+          git init -q
+          git apply --whitespace=nowarn --verbose "../$PATCH" 2>&1 | tail -5
           if find . -name '*.rej' | head -1 | grep -q .; then
             echo "补丁有冲突："
             find . -name '*.rej' -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
